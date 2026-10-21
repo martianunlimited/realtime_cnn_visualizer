@@ -26,14 +26,17 @@ def train(
     epochs_warmup: Annotated[int, typer.Option(help="Warmup epochs (head only)")] = 2,
     epochs_finetune: Annotated[
         int, typer.Option(help="End-to-end fine-tuning epochs")
-    ] = 8,
+    ] = 10,
     lr_head: Annotated[
         float, typer.Option(help="Learning rate for classification head")
-    ] = 1e-3,
+    ] = 3e-4,
     lr_backbone: Annotated[
         float, typer.Option(help="Learning rate for backbone")
-    ] = 1e-4,
+    ] = 2e-5,
     weight_decay: Annotated[float, typer.Option(help="Weight decay for AdamW")] = 1e-4,
+    label_smoothing: Annotated[
+        float, typer.Option(help="Label smoothing factor for CrossEntropyLoss")
+    ] = 0.1,
     device: Annotated[
         str, typer.Option(help="Computation device ('cuda' or 'cpu')")
     ] = "cuda",
@@ -49,6 +52,7 @@ def train(
         lr_head=lr_head,
         lr_backbone=lr_backbone,
         weight_decay=weight_decay,
+        label_smoothing=label_smoothing,
         device=device,
     )
 

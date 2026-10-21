@@ -10,7 +10,9 @@ def test_default_settings():
     assert settings.num_classes == 256
     assert settings.batch_size == 64
     assert settings.epochs_warmup == 2
-    assert settings.epochs_finetune == 8
+    assert settings.epochs_finetune == 10
+    assert settings.lr_backbone == 2e-5
+    assert settings.lr_head == 3e-4
     assert settings.onnx_output_path == Path("models/resnet18_caltech256.onnx")
     assert settings.onnx_int8_output_path == Path(
         "models/resnet18_caltech256_int8.onnx"
