@@ -46,25 +46,24 @@ Originally built as a Python/PyQt/TensorFlow application, this project is now po
 Original Keras / TensorFlow `.h5` ResNet50 models in FP32 format are ~98 MB, which exceeds GitHub's 25MB web upload limit and requires Git LFS. We provide three robust solutions:
 
 ### Solution 1: INT8 Dynamic Quantization (<25MB - Bundled Directly in Repo!)
-We quantized both MobileNetV2 and ResNet50 to INT8 using ONNX Runtime quantization:
+We quantized all models to INT8 using ONNX Runtime quantization:
+- **ResNet18 INT8 (Recommended):** **`10.84 MB`** (Fine-tuned on Caltech-256: **84.55% Top-1 Accuracy**, **94.90% Top-5 Accuracy**).
 - **MobileNetV2 INT8:** **`2.59 MB`** (loads in <0.5s, 60 FPS on any laptop or phone).
-- **ResNet50 INT8:** **`23.08 MB`** (**strictly under the 25MB GitHub limit!**).
+- **ResNet50 INT8:** **`23.08 MB`** (Deep 50-layer feature maps).
 
-Both quantized models are included directly in the `models/` directory and can be committed and hosted on GitHub Pages with zero external dependencies!
+All three quantized models are included directly in the `models/` directory and can be hosted on GitHub Pages with zero external dependencies!
 
 ### Solution 2: GitHub Releases (Up to 2GB, Free Global CDN)
-For full FP32 models (e.g. `resnet50_caltech256.onnx`, 91.6 MB):
+For full FP32 models (e.g. `resnet18_caltech256.onnx`, 43.1 MB, or `resnet50_caltech256.onnx`, 91.6 MB):
 1. In your GitHub repository, click **Releases** → **Draft a new release**.
-2. Tag it (e.g., `v1.0.0`) and attach `resnet50_caltech256.onnx` (GitHub allows up to 2 GB per asset).
-3. Copy the download URL:
-   `https://github.com/martianunlimited/realtime_cnn_visualizer/releases/download/v1.0.0/resnet50_caltech256.onnx`
-4. In the web app, choose **Load from Remote URL** and paste this link!
+2. Tag it (e.g., `v1.0.0`) and attach the `.onnx` files.
+3. Copy the download URL and paste into the app's **Load from Remote URL**!
 
 ### Solution 3: Hugging Face Model Hub (Industry Standard for Web ML)
 1. Upload your `.onnx` model to a free Hugging Face Model repo:
    `https://huggingface.co/martianunlimited/realtime-cnn-caltech256`
 2. Direct download URL with built-in CORS:
-   `https://huggingface.co/martianunlimited/realtime-cnn-caltech256/resolve/main/resnet50_caltech256.onnx`
+   `https://huggingface.co/martianunlimited/realtime-cnn-caltech256/resolve/main/resnet18_caltech256.onnx`
 3. Paste the URL into the app's remote loader.
 
 ### Solution 4: Local File Picker (Zero Network Upload)
@@ -72,20 +71,29 @@ Users can click **Load Local .ONNX File...** and select any `.onnx` model on the
 
 ---
 
-## 🛠️ Exporting Models from PyTorch / Keras
+## 🏋️ Training & Fine-Tuning ResNet18 on Caltech-256
 
-We have replaced legacy TensorFlow 1.x with modern PyTorch 2.x and standard ONNX tools:
+We provide a complete, modern Python 3.13 / PyTorch training pipeline with 2-phase warmup, differential learning rates, TensorBoard logging, and automatic ONNX + INT8 export.
 
 ```bash
-# Run the included model exporter
-python export_models.py
+# 1. Run full training, fine-tuning, and export:
+python train_resnet18_caltech256.py train --batch-size 64 --epochs-warmup 2 --epochs-finetune 5 --device cuda
+
+# 2. Evaluate saved checkpoint:
+python train_resnet18_caltech256.py evaluate checkpoints/resnet18_caltech256_best.pth
+
+# 3. Export an existing checkpoint to ONNX & INT8:
+python train_resnet18_caltech256.py export checkpoints/resnet18_caltech256_best.pth
+
+# 4. View real-time training curves in TensorBoard:
+tensorboard --logdir runs/resnet18_caltech256
 ```
 
-This exports:
-- `models/mobilenetv2_caltech256.onnx` (9.7 MB) & `_int8.onnx` (2.59 MB)
-- `models/resnet50_caltech256.onnx` (91.6 MB) & `_int8.onnx` (23.08 MB)
-
-All models include multi-layer activation taps: `act_layer1`, `act_layer2`, `act_layer3`, `act_layer4`, `act_layer5`, and classification `logits`.
+### Benchmark Metrics (ResNet18 Fine-Tuned):
+- **Warmup (Epochs 1–2):** 76.30% → 79.05% Top-1 Val Acc
+- **Fine-Tuning (Epochs 3–7):** 79.65% → **84.55% Top-1 Val Acc** (and **94.90% Top-5 Val Acc**)
+- **Quantized INT8 File Size:** **10.84 MB** (Fits cleanly under GitHub's 25MB file limit)
+- **Activation Taps:** `act_layer1` (112x112), `act_layer2` (56x56), `act_layer3` (28x28), `act_layer4` (14x14), `act_layer5` (7x7), and `logits`
 
 ---
 
