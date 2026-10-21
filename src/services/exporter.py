@@ -95,18 +95,14 @@ def export_resnet18_to_onnx(
         weight_type=QuantType.QUInt8,
     )
     size_int8_mb = os.path.getsize(cfg.onnx_int8_output_path) / (1024 * 1024)
-    print(
-        f"[ONNX] Quantized INT8 model: {cfg.onnx_int8_output_path} ({size_int8_mb:.2f} MB)"
-    )
+    print(f"[ONNX] Quantized INT8 model: {cfg.onnx_int8_output_path} ({size_int8_mb:.2f} MB)")
 
     # Verify exported INT8 model with ONNX Runtime
     print("[ONNX] Verifying INT8 model with ONNX Runtime...")
     session = ort.InferenceSession(
         str(cfg.onnx_int8_output_path), providers=["CPUExecutionProvider"]
     )
-    ort_inputs = {
-        session.get_inputs()[0].name: np.random.randn(1, 3, 224, 224).astype(np.float32)
-    }
+    ort_inputs = {session.get_inputs()[0].name: np.random.randn(1, 3, 224, 224).astype(np.float32)}
     ort_outputs = session.run(None, ort_inputs)
 
     assert len(ort_outputs) == 6, f"Expected 6 outputs, got {len(ort_outputs)}"

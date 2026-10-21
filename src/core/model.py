@@ -87,9 +87,7 @@ class MultiOutputResNet18(nn.Module):
             if not name.startswith("fc.") and p.requires_grad
         ]
         head_params = [
-            p
-            for name, p in self.named_parameters()
-            if name.startswith("fc.") and p.requires_grad
+            p for name, p in self.named_parameters() if name.startswith("fc.") and p.requires_grad
         ]
         return [
             {

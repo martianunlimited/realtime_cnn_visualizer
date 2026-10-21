@@ -39,9 +39,7 @@ class TrainingSettings(BaseSettings):
     epochs_finetune: int = Field(
         default=10, ge=1, description="Epochs to fine-tune backbone and head"
     )
-    lr_head: float = Field(
-        default=3e-4, gt=0.0, description="Warmup/head learning rate"
-    )
+    lr_head: float = Field(default=3e-4, gt=0.0, description="Warmup/head learning rate")
     lr_backbone: float = Field(
         default=2e-5, gt=0.0, description="Backbone fine-tuning learning rate"
     )
@@ -51,22 +49,14 @@ class TrainingSettings(BaseSettings):
     )
 
     # Device & checkpointing
-    device: str = Field(
-        default="cuda", description="Computation device ('cuda' or 'cpu')"
-    )
+    device: str = Field(default="cuda", description="Computation device ('cuda' or 'cpu')")
     checkpoint_dir: Path = Field(default=Path("checkpoints"))
     checkpoint_name: str = Field(default="resnet18_caltech256_best.pth")
     tensorboard_dir: Path = Field(default=Path("runs/resnet18_caltech256"))
-    plot_path: Path = Field(
-        default=Path("runs/resnet18_caltech256/training_curves.png")
-    )
-    history_path: Path = Field(
-        default=Path("runs/resnet18_caltech256/training_history.json")
-    )
+    plot_path: Path = Field(default=Path("runs/resnet18_caltech256/training_curves.png"))
+    history_path: Path = Field(default=Path("runs/resnet18_caltech256/training_history.json"))
 
     # Export & Quantization
     onnx_output_path: Path = Field(default=Path("models/resnet18_caltech256.onnx"))
-    onnx_int8_output_path: Path = Field(
-        default=Path("models/resnet18_caltech256_int8.onnx")
-    )
+    onnx_int8_output_path: Path = Field(default=Path("models/resnet18_caltech256_int8.onnx"))
     opset_version: int = Field(default=17)

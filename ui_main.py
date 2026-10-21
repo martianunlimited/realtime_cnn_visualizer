@@ -226,12 +226,22 @@ class Ui_MainWindow(object):
         MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow"))
         self.labelInput.setText(_translate("MainWindow", "realtime"))
         self.labelGradCam.setText(_translate("MainWindow", "gradCam"))
-        self.label_WebCamLabel.setText(_translate("MainWindow", "What the camera sees:"))
-        self.label_GCLabel.setText(_translate("MainWindow", "Why do I think that is so"))
-        self.label_predLabel.setText(_translate("MainWindow", "I think the object is ... with \"confidence\" ... "))
+        self.label_WebCamLabel.setText(
+            _translate("MainWindow", "What the camera sees:")
+        )
+        self.label_GCLabel.setText(
+            _translate("MainWindow", "Why do I think that is so")
+        )
+        self.label_predLabel.setText(
+            _translate("MainWindow", 'I think the object is ... with "confidence" ... ')
+        )
         self.labelPred_top.setText(_translate("MainWindow", "Prediction"))
-        self.label_predLabel2.setText(_translate("MainWindow", "This object might also be"))
-        self.label.setText(_translate("MainWindow", "How computers understand what they see"))
+        self.label_predLabel2.setText(
+            _translate("MainWindow", "This object might also be")
+        )
+        self.label.setText(
+            _translate("MainWindow", "How computers understand what they see")
+        )
         self.labelMap11.setText(_translate("MainWindow", "TextLabel"))
         self.labelMap12.setText(_translate("MainWindow", "TextLabel"))
         self.labelMap14.setText(_translate("MainWindow", "TextLabel"))
@@ -267,7 +277,12 @@ class Ui_MainWindow(object):
         self.labelMap71.setText(_translate("MainWindow", "TextLabel"))
         self.labelMap75.setText(_translate("MainWindow", "TextLabel"))
         self.labelMap74.setText(_translate("MainWindow", "TextLabel"))
-        self.label_2.setText(_translate("MainWindow", "Here are some of the convolutional layers, although we only show 5 in each layers, there are hundreds to thousands in each layer"))
+        self.label_2.setText(
+            _translate(
+                "MainWindow",
+                "Here are some of the convolutional layers, although we only show 5 in each layers, there are hundreds to thousands in each layer",
+            )
+        )
         self.labelPred1.setText(_translate("MainWindow", "TextLabel"))
         self.labelPred2.setText(_translate("MainWindow", "TextLabel"))
         self.labelPred3.setText(_translate("MainWindow", "TextLabel"))

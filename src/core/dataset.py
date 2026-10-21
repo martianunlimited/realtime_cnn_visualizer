@@ -88,9 +88,7 @@ class Caltech256Dataset(Dataset):
                 [
                     transforms.Resize((224, 224)),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                    ),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
                 ]
             )
             img_tensor = default_transform(img)
@@ -132,9 +130,7 @@ def build_dataloaders(
     base_dataset = Caltech256Dataset(data_dir=settings.data_dir)
     num_samples = len(base_dataset)
     if num_samples == 0:
-        raise RuntimeError(
-            f"No samples found in dataset directory: {settings.data_dir}"
-        )
+        raise RuntimeError(f"No samples found in dataset directory: {settings.data_dir}")
 
     # Reproducible train / validation index split
     indices = list(range(num_samples))

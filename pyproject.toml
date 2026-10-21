@@ -1,0 +1,25 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+exclude = [
+    "ui_main.py",
+    "ui.py",
+    "main.py",
+    "main_v2.py",
+    "guidedBackprop.py",
+    "timed.py",
+    "ui_v2.py",
+    "utils.py",
+    "streamReader.py",
+    "gradcam.py",
+    "maps.py",
+    "networks.py"
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]

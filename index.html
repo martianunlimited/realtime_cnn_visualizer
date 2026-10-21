@@ -75,12 +75,17 @@
         <div class="media-control-row">
           <button class="btn-tool" id="btn-toggle-cam" type="button">⏹️ Stop Camera</button>
           <button class="btn-tool" id="btn-pause-stream" type="button">⏸️ Pause</button>
+          <button class="btn-tool" id="btn-color-order" type="button" title="Toggle RGB (PyTorch standard) or BGR (OpenCV standard)">🎨 Format: RGB</button>
 
           <!-- Sample Photo Fallback (For users without webcam) -->
           <select class="styled-select" id="sample-select" aria-label="Sample Photo Selection">
             <option value="">🖼️ Select Test Image...</option>
-            <option value="sample_images/cat_dog_cam_resnet_conv2_0.png">Cat & Dog (Benchmark)</option>
-            <option value="sample_images/cat_dog_cam_vgg_conv1_1.png">Animal Contrast Test</option>
+            <option value="sample_images/bear.jpg">🐻 Bear (Wild Animal)</option>
+            <option value="sample_images/ak47.jpg">🔫 AK-47 (Object)</option>
+            <option value="sample_images/toad.jpg">🐸 Toad (Amphibian)</option>
+            <option value="sample_images/american_flag.jpg">🇺🇸 American Flag (Symbol)</option>
+            <option value="sample_images/greyhound.jpg">🐕 Greyhound (Dog)</option>
+            <option value="sample_images/backpack.jpg">🎒 Backpack (Accessory)</option>
           </select>
 
           <label class="btn-tool" for="custom-img-upload" title="Upload custom photo or video">

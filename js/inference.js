@@ -12,12 +12,18 @@ export class CNNInferenceEngine {
     this.onStatusChange = onStatusChange || (() => {});
     this.inputWidth = 224;
     this.inputHeight = 224;
+    this.colorOrder = 'RGB'; // 'RGB' (PyTorch default) or 'BGR' (OpenCV/Caffe default)
     
     // Off-screen canvas for frame capture and resizing
     this.prepCanvas = document.createElement('canvas');
     this.prepCanvas.width = this.inputWidth;
     this.prepCanvas.height = this.inputHeight;
     this.prepCtx = this.prepCanvas.getContext('2d', { willReadFrequently: true });
+  }
+
+  setColorOrder(order) {
+    this.colorOrder = (order || 'RGB').toUpperCase();
+    console.log(`[Engine] Color channel order set to: ${this.colorOrder}`);
   }
 
   async loadLabels(labelsUrl = 'caltech_labels.json') {
@@ -131,9 +137,10 @@ export class CNNInferenceEngine {
     ctx.drawImage(videoOrImage, sx, sy, sw, sh, 0, 0, w, h);
     const imgData = ctx.getImageData(0, 0, w, h).data;
 
-    // ImageNet standard normalization: mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225]
-    const mean = [0.485, 0.456, 0.406];
-    const std = [0.229, 0.224, 0.225];
+    // Normalization parameters (ImageNet default)
+    const isBGR = (this.colorOrder || 'RGB').toUpperCase() === 'BGR';
+    const mean = isBGR ? [0.406, 0.456, 0.485] : [0.485, 0.456, 0.406];
+    const std = isBGR ? [0.225, 0.224, 0.229] : [0.229, 0.224, 0.225];
 
     const floatData = new Float32Array(3 * w * h);
     const planeSize = w * h;
@@ -143,9 +150,14 @@ export class CNNInferenceEngine {
       const g = imgData[i * 4 + 1] / 255.0;
       const b = imgData[i * 4 + 2] / 255.0;
 
-      floatData[i] = (r - mean[0]) / std[0];                   // R channel
-      floatData[planeSize + i] = (g - mean[1]) / std[1];       // G channel
-      floatData[2 * planeSize + i] = (b - mean[2]) / std[2];   // B channel
+      // In RGB: Ch0=R, Ch1=G, Ch2=B | In BGR: Ch0=B, Ch1=G, Ch2=R
+      const ch0 = isBGR ? b : r;
+      const ch1 = g;
+      const ch2 = isBGR ? r : b;
+
+      floatData[i] = (ch0 - mean[0]) / std[0];                   // Channel 0
+      floatData[planeSize + i] = (ch1 - mean[1]) / std[1];       // Channel 1
+      floatData[2 * planeSize + i] = (ch2 - mean[2]) / std[2];   // Channel 2
     }
 
     return new ort.Tensor('float32', floatData, [1, 3, h, w]);

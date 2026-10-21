@@ -164,9 +164,7 @@ class ResNet18Trainer:
 
     def __init__(self, settings: TrainingSettings | None = None):
         self.settings = settings or TrainingSettings()
-        self.device = torch.device(
-            self.settings.device if torch.cuda.is_available() else "cpu"
-        )
+        self.device = torch.device(self.settings.device if torch.cuda.is_available() else "cpu")
 
         self.model = MultiOutputResNet18(
             num_classes=self.settings.num_classes,
@@ -174,12 +172,8 @@ class ResNet18Trainer:
         ).to(self.device)
 
         # Label smoothing helps avoid overconfident probability distributions
-        self.criterion = nn.CrossEntropyLoss(
-            label_smoothing=self.settings.label_smoothing
-        )
-        self.train_loader, self.val_loader, self.classes = build_dataloaders(
-            self.settings
-        )
+        self.criterion = nn.CrossEntropyLoss(label_smoothing=self.settings.label_smoothing)
+        self.train_loader, self.val_loader, self.classes = build_dataloaders(self.settings)
 
         self.settings.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.settings.tensorboard_dir.mkdir(parents=True, exist_ok=True)
@@ -278,9 +272,7 @@ class ResNet18Trainer:
             "model_state_dict": self.model.state_dict(),
         }
         torch.save(checkpoint, path)
-        print(
-            f" Saved checkpoint with Top-1 Val Acc {val_acc:.2f}% to {path}", flush=True
-        )
+        print(f" Saved checkpoint with Top-1 Val Acc {val_acc:.2f}% to {path}", flush=True)
 
     def _record_epoch_metrics(
         self,
@@ -342,9 +334,7 @@ class ResNet18Trainer:
         print("==========================================\n", flush=True)
 
         global_epoch = 0
-        best_checkpoint_path = (
-            self.settings.checkpoint_dir / self.settings.checkpoint_name
-        )
+        best_checkpoint_path = self.settings.checkpoint_dir / self.settings.checkpoint_name
 
         # Phase 1: Warmup - Freeze backbone, train only classification head
         if self.settings.epochs_warmup > 0:
@@ -387,9 +377,7 @@ class ResNet18Trainer:
                     self.save_checkpoint(best_checkpoint_path, val_top1, global_epoch)
 
         # Phase 2: Full Fine-Tuning - Unfreeze backbone with lower differential learning rates
-        print(
-            "\n--- Phase 2: End-to-End Fine-Tuning (Low Learning Rates) ---", flush=True
-        )
+        print("\n--- Phase 2: End-to-End Fine-Tuning (Low Learning Rates) ---", flush=True)
         self.model.unfreeze_backbone()
         param_groups = self.model.get_parameter_groups(
             lr_backbone=self.settings.lr_backbone,

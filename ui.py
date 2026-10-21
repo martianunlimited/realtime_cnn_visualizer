@@ -1,15 +1,9 @@
-from PyQt5.QtWidgets import QMainWindow, QFileDialog, QDialog, QWidget, \
-                            QApplication, QTabWidget, QLabel, QHBoxLayout, \
-                            QPushButton
-from PyQt5.QtCore import pyqtSignal, pyqtSlot, QDir, QObject, Qt, QThread, \
-                         QTimer, QEvent
-from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage, QGuiApplication, \
-                        QCursor, QClipboard
+from PyQt5.QtWidgets import QMainWindow, QApplication, QLabel
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt
+from PyQt5.QtGui import QPixmap, QImage
 
 import numpy as np
-import os
 import sys
-import datetime
 import cv2
 
 from ui_main import Ui_MainWindow
@@ -41,6 +35,7 @@ class FeaturesMap(QLabel):
     def resetIdx(self):
         self.raw_idx = 0
 
+
 class DenseMap(QLabel):
     cell_changed = pyqtSignal(int)
 
@@ -52,7 +47,7 @@ class DenseMap(QLabel):
         self.cell_limit = 1
 
     def setGridSize(self, shape):
-         self._cols, self._rows, _ = shape
+        self._cols, self._rows, _ = shape
 
     def setCellNumbers(self, number):
         self.cell_limit = number
@@ -69,7 +64,7 @@ class DenseMap(QLabel):
             dif = (s_height - p_height) // 2
             cubeHeight = p_height / self._cols
             cur_row = pos.x() // cubeWidth
-            cur_col = (pos.y() - dif ) // cubeHeight
+            cur_col = (pos.y() - dif) // cubeHeight
         else:
             cubeWidth = self.width() / self._rows
             cubeHeight = self.height() / self._cols
@@ -80,6 +75,7 @@ class DenseMap(QLabel):
     def resetIdx(self):
         self.raw_idx = 0
 
+
 class Ui(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -87,8 +83,8 @@ class Ui(QMainWindow):
         self.ui.setupUi(self)
         self._show_colored = True
 
-        self.conv_layers = ['Conv1', 'Layer2', 'Layer3'] * 8
-        self.dense_layers = ['FC1', 'Layer2', 'Layer3'] * 8
+        self.conv_layers = ["Conv1", "Layer2", "Layer3"] * 8
+        self.dense_layers = ["FC1", "Layer2", "Layer3"] * 8
         self.fillLayers(self.conv_layers, self.dense_layers)
 
         self.convMap = FeaturesMap()
@@ -109,9 +105,9 @@ class Ui(QMainWindow):
     @pyqtSlot()
     def PausePlay(self):
         if self.paused:
-            self.ui.pushButtonPlay.setText('Pause')
+            self.ui.pushButtonPlay.setText("Pause")
         else:
-            self.ui.pushButtonPlay.setText('Play')
+            self.ui.pushButtonPlay.setText("Play")
         self.paused = not self.paused
 
     @pyqtSlot(int)
@@ -127,20 +123,20 @@ class Ui(QMainWindow):
         if num < self.denseMap.cell_limit:
             self.ui.labelDenseNum.setText(str(num))
         else:
-            self.ui.labelDenseNum.setText('Out')
+            self.ui.labelDenseNum.setText("Out")
 
     @pyqtSlot(str)
     def ConvLayerChanged(self, layer_name):
         self.currentConv = layer_name
         self.ui.labelMapName.setText(self.currentConv)
-        self.ui.labelMapNum.setText('0')
+        self.ui.labelMapNum.setText("0")
         self.convMap.resetIdx()
 
     @pyqtSlot(str)
     def DenseLayerChanged(self, layer_name):
         self.currentDense = layer_name
         self.ui.labelDenseName.setText(layer_name)
-        self.ui.labelDenseNum.setText('0')
+        self.ui.labelDenseNum.setText("0")
         # self.denseMap.resetIdx()
 
     def fillLayers(self, conv_layers, dense_layers):
@@ -194,8 +190,11 @@ class Ui(QMainWindow):
         label.setPixmap(pixmap)
 
     def loadMap(self, image, size):
-        img = cv2.resize(image, (self.convMap.width(), self.convMap.height()),
-                                 interpolation = cv2.INTER_NEAREST)
+        img = cv2.resize(
+            image,
+            (self.convMap.width(), self.convMap.height()),
+            interpolation=cv2.INTER_NEAREST,
+        )
         if self._show_colored:
             img = cv2.applyColorMap(img, cv2.COLORMAP_JET)
             # hsvImg = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
@@ -224,7 +223,7 @@ class Ui(QMainWindow):
         label.setPixmap(QPixmap(qImg))
 
     def loadCell(self, image):
-        img = cv2.resize(image, (224, 224),interpolation = cv2.INTER_NEAREST)
+        img = cv2.resize(image, (224, 224), interpolation=cv2.INTER_NEAREST)
         if self._show_colored:
             img = cv2.applyColorMap(img, cv2.COLORMAP_JET)
             height, width, _ = img.shape
@@ -245,5 +244,5 @@ def run_ui():
     sys.exit(app.exec_())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_ui()

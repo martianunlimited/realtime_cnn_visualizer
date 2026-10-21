@@ -29,8 +29,12 @@ export const MODEL_CONFIGS = {
 };
 
 export const SAMPLE_IMAGES = [
-  { id: 'cat_dog', name: 'Cat & Dog Benchmark', path: 'sample_images/cat_dog_cam_resnet_conv2_0.png' },
-  { id: 'vgg_sample', name: 'VGG Contrast Test', path: 'sample_images/cat_dog_cam_vgg_conv1_1.png' }
+  { id: 'bear', name: '🐻 Bear (Wild Animal)', path: 'sample_images/bear.jpg' },
+  { id: 'ak47', name: '🔫 AK-47 (Object)', path: 'sample_images/ak47.jpg' },
+  { id: 'toad', name: '🐸 Toad (Amphibian)', path: 'sample_images/toad.jpg' },
+  { id: 'american_flag', name: '🇺🇸 American Flag (Symbol)', path: 'sample_images/american_flag.jpg' },
+  { id: 'greyhound', name: '🐕 Greyhound (Dog)', path: 'sample_images/greyhound.jpg' },
+  { id: 'backpack', name: '🎒 Backpack (Accessory)', path: 'sample_images/backpack.jpg' }
 ];
 
 class RealtimeCNNApp {
@@ -72,11 +76,12 @@ class RealtimeCNNApp {
     // 1. Load Caltech-256 class labels
     await this.engine.loadLabels('caltech_labels.json');
 
-    // 2. Load default lightweight model (~2.6MB)
+    // 2. Load fine-tuned ResNet-18 model (~11MB)
+    const initialConfig = MODEL_CONFIGS[this.selectedModelKey] || MODEL_CONFIGS.RESNET18_INT8;
     try {
-      await this.engine.loadModel(MODEL_CONFIGS.MOBILENET_INT8.url);
+      await this.engine.loadModel(initialConfig.url);
     } catch (err) {
-      console.warn('Local model fetch failed, prompt for file or fallback:', err);
+      console.warn('Initial model load failed, prompt for file or fallback:', err);
     }
 
     // 3. Start Webcam
@@ -104,6 +109,7 @@ class RealtimeCNNApp {
       canvasGradCam: document.getElementById('gradcam-canvas'),
       btnToggleCam: document.getElementById('btn-toggle-cam'),
       btnPauseStream: document.getElementById('btn-pause-stream'),
+      btnColorOrder: document.getElementById('btn-color-order'),
       sampleSelect: document.getElementById('sample-select'),
       customImgUpload: document.getElementById('custom-img-upload'),
 
@@ -193,6 +199,15 @@ class RealtimeCNNApp {
       this.dom.btnPauseStream.addEventListener('click', () => {
         this.isPaused = !this.isPaused;
         this.dom.btnPauseStream.innerHTML = this.isPaused ? '▶️ Resume' : '⏸️ Pause';
+      });
+    }
+
+    // Color Format Toggle (RGB vs BGR)
+    if (this.dom.btnColorOrder) {
+      this.dom.btnColorOrder.addEventListener('click', () => {
+        const newOrder = this.engine.colorOrder === 'RGB' ? 'BGR' : 'RGB';
+        this.engine.setColorOrder(newOrder);
+        this.dom.btnColorOrder.innerHTML = `🎨 Format: ${newOrder}`;
       });
     }
 
@@ -345,6 +360,9 @@ class RealtimeCNNApp {
     this.dom.videoElement.classList.add('hidden');
     this.dom.sampleImgElement.classList.remove('hidden');
     this.dom.sampleImgElement.src = src;
+    if (this.dom.sampleImgElement.complete && this.dom.sampleImgElement.naturalWidth > 0) {
+      this.activeMediaElement = this.dom.sampleImgElement;
+    }
     this.dom.sampleImgElement.onload = () => {
       this.activeMediaElement = this.dom.sampleImgElement;
     };
@@ -371,7 +389,7 @@ class RealtimeCNNApp {
         // 4. Update Latency & FPS
         this.updatePerformanceMetrics(results.timings);
       } catch (err) {
-        // Skip frame if inference encounters transient issue
+        console.error('Inference render error:', err);
       }
     }
 
