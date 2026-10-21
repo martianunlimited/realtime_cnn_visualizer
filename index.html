@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-Time CNN Activation & Feature Visualizer | WebGPU In-Browser Deep Learning</title>
+  <meta name="description" content="Real-time in-browser convolutional neural network visualizer powered by WebGPU and ONNX Runtime Web. Live webcam feed, multi-layer activation maps, and Grad-CAM attention. Zero server required.">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22><text y=%2222%22 font-size=%2222%22>⚡</text></svg>">
+  <!-- ONNX Runtime Web (WebGPU & WebAssembly) -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.all.min.js"></script>
+</head>
+<body>
+
+  <!-- Top App Header -->
+  <header class="app-header" id="main-header">
+    <div class="brand-section">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-titles">
+        <h1>Real-Time CNN Visualizer</h1>
+        <div class="brand-subtitle">WebGPU & WebAssembly In-Browser Inference • Multi-Layer Activations & Grad-CAM</div>
+      </div>
+    </div>
+
+    <!-- Live Performance & Hardware Badges -->
+    <div class="header-status-metrics">
+      <div class="badge-hardware badge-webgpu" id="backend-badge">⚡ Checking WebGPU...</div>
+      <div class="badge-metric" id="fps-badge">-- FPS</div>
+      <div class="badge-metric" id="latency-badge">-- ms latency</div>
+    </div>
+  </header>
+
+  <main class="app-main" id="main-content">
+
+    <!-- Global Model & Backend Toolbar -->
+    <section class="model-toolbar" id="model-toolbar" aria-label="Model Configuration">
+      <div class="toolbar-group">
+        <label class="toolbar-label" for="model-select">CNN Model:</label>
+        <select class="styled-select" id="model-select" aria-label="Select CNN Backbone">
+          <option value="MOBILENET_INT8" selected>MobileNetV2 (Caltech-256, INT8 ~2.6MB - Fastest)</option>
+          <option value="RESNET50_INT8">ResNet50 (Caltech-256, INT8 ~23MB - Deep Features)</option>
+          <option value="custom_file">📁 Load Local .ONNX File...</option>
+          <option value="custom_url">🌐 Load from Remote URL (GitHub Release / HuggingFace)...</option>
+        </select>
+        <input type="file" id="custom-model-file" accept=".onnx" style="display:none">
+      </div>
+
+      <!-- Live Status Message -->
+      <div class="status-banner status-loading" id="status-banner">
+        Initializing WebGPU execution environment...
+      </div>
+    </section>
+
+    <!-- Main Two-Column Dashboard -->
+    <section class="dashboard-stage" id="dashboard-stage">
+
+      <!-- LEFT COLUMN: WEBCAM FEED, GRAD-CAM, AND PREDICTIONS -->
+      <article class="card" id="card-video-stream">
+        <div class="card-header">
+          <h2 class="card-title">
+            <span>📹</span> Camera Feed & Grad-CAM Attention
+          </h2>
+          <span class="card-badge" id="camera-status-badge">Live Stream</span>
+        </div>
+
+        <!-- Video & Grad-CAM Canvas Viewport -->
+        <div class="media-viewport">
+          <video class="video-stream" id="webcam-video" autoplay playsinline muted></video>
+          <img class="sample-image hidden" id="sample-image" alt="Sample Benchmark Photo">
+          <canvas class="gradcam-canvas-overlay" id="gradcam-canvas"></canvas>
+        </div>
+
+        <!-- Stream Action Tools -->
+        <div class="media-control-row">
+          <button class="btn-tool" id="btn-toggle-cam" type="button">⏹️ Stop Camera</button>
+          <button class="btn-tool" id="btn-pause-stream" type="button">⏸️ Pause</button>
+
+          <!-- Sample Photo Fallback (For users without webcam) -->
+          <select class="styled-select" id="sample-select" aria-label="Sample Photo Selection">
+            <option value="">🖼️ Select Test Image...</option>
+            <option value="sample_images/cat_dog_cam_resnet_conv2_0.png">Cat & Dog (Benchmark)</option>
+            <option value="sample_images/cat_dog_cam_vgg_conv1_1.png">Animal Contrast Test</option>
+          </select>
+
+          <label class="btn-tool" for="custom-img-upload" title="Upload custom photo or video">
+            📁 Upload
+            <input type="file" id="custom-img-upload" accept="image/*,video/*" style="display:none">
+          </label>
+        </div>
+
+        <!-- Grad-CAM Heatmap Controls -->
+        <div class="gradcam-controls-row">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="toggle-gradcam" checked>
+            <strong>Grad-CAM Attention Overlay</strong>
+          </label>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <label for="gradcam-alpha">Opacity:</label>
+            <input type="range" id="gradcam-alpha" min="0" max="1" step="0.05" value="0.55" style="width:70px; accent-color:var(--accent-cyan);">
+            <span id="alpha-display" style="font-family:var(--font-mono); font-size:0.75rem;">55%</span>
+          </div>
+        </div>
+
+        <!-- Live Classification Predictions -->
+        <div class="card-header" style="margin-top: 6px;">
+          <h3 class="card-title" style="font-size: 0.95rem;">
+            <span>🎯</span> Caltech-256 Top Predictions
+          </h3>
+          <span class="card-badge" id="top-class-display">Inferring...</span>
+        </div>
+
+        <div class="predictions-container" id="predictions-list">
+          <div style="color:var(--text-muted); font-size:0.8rem; text-align:center; padding:12px;">
+            Awaiting model inference...
+          </div>
+        </div>
+      </article>
+
+      <!-- RIGHT COLUMN: MULTI-LAYER ACTIVATION MAPS & CHANNEL INSPECTOR -->
+      <article class="card" id="card-activations">
+        <div class="card-header">
+          <h2 class="card-title">
+            <span>🧠</span> Convolutional Layer Activations
+          </h2>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <label for="colormap-select" style="font-size:0.75rem; color:var(--text-secondary);">Colormap:</label>
+            <select class="styled-select" id="colormap-select" aria-label="Select Colormap">
+              <option value="jet" selected>Jet (Classic MATLAB/OpenCV)</option>
+              <option value="turbo">Turbo (Google High-Contrast)</option>
+              <option value="viridis">Viridis (Perceptually Uniform)</option>
+              <option value="inferno">Inferno (Thermal Heatmap)</option>
+              <option value="cyan">Neon Cyan (Deep Glow)</option>
+              <option value="gray">Monochrome (Grayscale)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Layer Selector Tabs -->
+        <div class="layer-tabs" id="layer-tabs" aria-label="CNN Layers">
+          <!-- Dynamically populated from active model outputs -->
+        </div>
+
+        <!-- Two-Panel Feature Maps Stage: Montage Grid + Single Channel Zoom -->
+        <div class="features-stage">
+          <!-- Left Sub-panel: Feature Map Montage Grid (like mapsToGrid in Qt) -->
+          <div class="montage-container">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:0.75rem; font-weight:600; color:var(--text-secondary);" id="montage-title">
+                Filter Montage Grid (Click any channel to zoom):
+              </span>
+              <span class="card-badge" id="montage-dims-badge">-- Channels</span>
+            </div>
+
+            <div class="montage-canvas-wrap">
+              <canvas class="montage-canvas" id="montage-canvas" width="480" height="480" aria-label="Feature Map Montage Grid"></canvas>
+            </div>
+          </div>
+
+          <!-- Right Sub-panel: Single Channel Zoom Inspector -->
+          <div class="single-channel-inspector">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:0.75rem; font-weight:600; color:var(--accent-cyan);" id="channel-index-display">
+                Channel #0
+              </span>
+              <span style="font-size:0.7rem; color:var(--text-muted);">Enlarged</span>
+            </div>
+
+            <div class="single-channel-wrap">
+              <canvas class="single-channel-canvas" id="single-channel-canvas" width="224" height="224" aria-label="Single Channel Zoom Canvas"></canvas>
+            </div>
+
+            <!-- Channel Stepper Slider -->
+            <input type="range" id="channel-index-slider" min="0" max="63" value="0" style="width:100%; accent-color:var(--accent-cyan); cursor:pointer;">
+
+            <!-- Channel Statistics -->
+            <div class="channel-stats-grid">
+              <div class="channel-stat-item">
+                <span class="stat-label">Min Act</span>
+                <span class="stat-val" id="stat-channel-min">0.00</span>
+              </div>
+              <div class="channel-stat-item">
+                <span class="stat-label">Max Act</span>
+                <span class="stat-val" id="stat-channel-max">0.00</span>
+              </div>
+              <div class="channel-stat-item">
+                <span class="stat-label">Mean Act</span>
+                <span class="stat-val" id="stat-channel-mean">0.00</span>
+              </div>
+              <div class="channel-stat-item">
+                <span class="stat-label">Sparsity</span>
+                <span class="stat-val" id="stat-channel-sparsity">0.0%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Educational Guide Box -->
+        <div class="educational-guide">
+          <div class="guide-title">💡 How Convolutional Layers Build Visual Representations</div>
+          <div class="guide-text">
+            <strong>Layer 1 (Stem / Early):</strong> Extracts low-level spatial primitives like oriented edges, gradients, and contrasting color patches.<br>
+            <strong>Layers 2 & 3 (Mid-level):</strong> Combines edges into textures, repeating motifs, corners, and geometric patterns.<br>
+            <strong>Layers 4 & 5 (Deep Semantic):</strong> Groups patterns into recognizable object parts (wheels, faces, wings) and full category concepts.<br>
+            <strong>Grad-CAM:</strong> Traces classification gradients back to the final convolutional feature maps to produce a spatial heatmap showing where the CNN is focusing.
+          </div>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- Remote URL Modal -->
+    <div class="modal-overlay hidden" id="url-modal">
+      <div class="modal-card">
+        <h3 style="font-family:var(--font-heading); font-size:1.1rem;">Load Model from Remote URL</h3>
+        <p style="font-size:0.8rem; color:var(--text-secondary);">
+          Paste a direct HTTPS URL to any ONNX model (e.g. from GitHub Releases, Hugging Face, or Cloudflare R2):
+        </p>
+        <input class="styled-text-input" id="model-url-input" type="url" placeholder="https://huggingface.co/.../model.onnx">
+        <div style="display:flex; justify-content:flex-end; gap:8px;">
+          <button class="btn-tool" onclick="document.getElementById('url-modal').classList.add('hidden')" type="button">Cancel</button>
+          <button class="btn-tool" id="btn-load-url" style="background:var(--accent-cyan); color:#000; font-weight:700;" type="button">Load Model</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
