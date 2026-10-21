@@ -8,6 +8,12 @@ import { CNNInferenceEngine } from './inference.js';
 import { COLORMAPS, getRGB } from './colormaps.js';
 
 export const MODEL_CONFIGS = {
+  RESNET18_INT8: {
+    id: 'resnet18_int8',
+    name: 'ResNet18 (Caltech-256 Fine-Tuned, INT8 ~11MB - Recommended)',
+    url: 'models/resnet18_caltech256_int8.onnx',
+    description: 'Fine-tuned ResNet-18 on Caltech-256 with high top-1 accuracy. Compact ~11MB INT8 model with 5 multi-layer activation taps.'
+  },
   MOBILENET_INT8: {
     id: 'mobilenetv2_int8',
     name: 'MobileNetV2 (Caltech-256, INT8 ~2.6MB - Fastest)',
@@ -34,7 +40,7 @@ class RealtimeCNNApp {
     });
 
     // State
-    this.selectedModelKey = 'MOBILENET_INT8';
+    this.selectedModelKey = 'RESNET18_INT8';
     this.activeLayerKey = 'act_layer1';
     this.selectedChannel = 0;
     this.colormap = COLORMAPS.JET;

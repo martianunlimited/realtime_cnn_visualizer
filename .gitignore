@@ -4,8 +4,9 @@ __pycache__/
 *$py.class
 .pytest_cache/
 
-# Large unquantized ONNX models (>50MB, host on GitHub Releases / HuggingFace)
+# Large unquantized ONNX models (>25MB, host on GitHub Releases / HuggingFace)
 models/resnet50_caltech256.onnx
+models/resnet18_caltech256.onnx
 *.onnx.data
 *.h5
 *.pth
@@ -16,3 +17,8 @@ models/resnet50_caltech256.onnx
 Thumbs.db
 .vscode/
 .idea/
+
+# Datasets and training artifacts
+data/
+runs/
+checkpoints/

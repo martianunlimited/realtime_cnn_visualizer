@@ -37,7 +37,8 @@
       <div class="toolbar-group">
         <label class="toolbar-label" for="model-select">CNN Model:</label>
         <select class="styled-select" id="model-select" aria-label="Select CNN Backbone">
-          <option value="MOBILENET_INT8" selected>MobileNetV2 (Caltech-256, INT8 ~2.6MB - Fastest)</option>
+          <option value="RESNET18_INT8" selected>ResNet18 (Caltech-256 Fine-Tuned, INT8 ~11MB - Recommended)</option>
+          <option value="MOBILENET_INT8">MobileNetV2 (Caltech-256, INT8 ~2.6MB - Fastest)</option>
           <option value="RESNET50_INT8">ResNet50 (Caltech-256, INT8 ~23MB - Deep Features)</option>
           <option value="custom_file">📁 Load Local .ONNX File...</option>
           <option value="custom_url">🌐 Load from Remote URL (GitHub Release / HuggingFace)...</option>
