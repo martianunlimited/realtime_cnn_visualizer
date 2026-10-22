@@ -1,18 +1,24 @@
-"""Training and Export Configuration for ResNet18 on Caltech-256."""
+"""Training and Export Configuration for CNNs on Caltech-256."""
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class TrainingSettings(BaseSettings):
-    """Configuration settings for fine-tuning ResNet18 on Caltech-256."""
+    """Configuration settings for fine-tuning CNN backbones on Caltech-256."""
 
     model_config = SettingsConfigDict(
         env_prefix="CALTECH_",
         env_file=".env",
         extra="ignore",
+    )
+
+    # Model architecture
+    model_name: str = Field(
+        default="resnet18",
+        description="Backbone architecture ('resnet18', 'mobilenet_v2', 'resnet50')",
     )
 
     # Data paths & parameters
@@ -28,13 +34,13 @@ class TrainingSettings(BaseSettings):
     val_split: float = Field(default=0.15, gt=0.0, lt=0.5)
     seed: int = Field(default=42)
 
-    # Training hyperparameters (Low learning rate schedule for gentle convergence)
+    # Training hyperparameters
     batch_size: int = Field(default=64, ge=1, le=512)
     num_workers: int = Field(default=4, ge=0)
     epochs_warmup: int = Field(
         default=2,
         ge=0,
-        description="Epochs to train only the linear classification head",
+        description="Epochs to train only the classification head",
     )
     epochs_finetune: int = Field(
         default=10, ge=1, description="Epochs to fine-tune backbone and head"
@@ -60,3 +66,32 @@ class TrainingSettings(BaseSettings):
     onnx_output_path: Path = Field(default=Path("models/resnet18_caltech256.onnx"))
     onnx_int8_output_path: Path = Field(default=Path("models/resnet18_caltech256_int8.onnx"))
     opset_version: int = Field(default=17)
+
+    @model_validator(mode="after")
+    def resolve_model_paths(self) -> "TrainingSettings":
+        """Auto-configure default paths if model_name is set and paths were not explicitly overridden."""
+        clean_name = self.model_name.replace("-", "").replace("_", "").lower()
+        # Canonical names: resnet18, mobilenetv2, resnet50
+        if "mobilenet" in clean_name:
+            tag = "mobilenetv2"
+        elif "resnet50" in clean_name:
+            tag = "resnet50"
+        else:
+            tag = "resnet18"
+
+        # Update defaults if they still reference resnet18 and model_name is different
+        if tag != "resnet18":
+            if self.checkpoint_name == "resnet18_caltech256_best.pth":
+                self.checkpoint_name = f"{tag}_caltech256_best.pth"
+            if self.tensorboard_dir == Path("runs/resnet18_caltech256"):
+                self.tensorboard_dir = Path(f"runs/{tag}_caltech256")
+            if self.plot_path == Path("runs/resnet18_caltech256/training_curves.png"):
+                self.plot_path = Path(f"runs/{tag}_caltech256/training_curves.png")
+            if self.history_path == Path("runs/resnet18_caltech256/training_history.json"):
+                self.history_path = Path(f"runs/{tag}_caltech256/training_history.json")
+            if self.onnx_output_path == Path("models/resnet18_caltech256.onnx"):
+                self.onnx_output_path = Path(f"models/{tag}_caltech256.onnx")
+            if self.onnx_int8_output_path == Path("models/resnet18_caltech256_int8.onnx"):
+                self.onnx_int8_output_path = Path(f"models/{tag}_caltech256_int8.onnx")
+
+        return self

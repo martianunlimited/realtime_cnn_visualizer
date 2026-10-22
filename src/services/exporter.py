@@ -1,4 +1,4 @@
-"""Export and Quantization service for ResNet18."""
+"""Export and Quantization service for multi-output CNNs."""
 
 import os
 from pathlib import Path
@@ -10,13 +10,12 @@ from onnxruntime.quantization import QuantType, quantize_dynamic
 from torch import nn
 
 from src.config.settings import TrainingSettings
-from src.core.model import MultiOutputResNet18
 
 
-class ResNet18OnnxWrapper(nn.Module):
+class MultiOutputOnnxWrapper(nn.Module):
     """Wrapper ensuring return_features=True is fixed for ONNX graph tracing."""
 
-    def __init__(self, model: MultiOutputResNet18):
+    def __init__(self, model: nn.Module):
         super().__init__()
         self.model = model
 
@@ -34,11 +33,15 @@ class ResNet18OnnxWrapper(nn.Module):
         return logits, act1, act2, act3, act4, act5
 
 
-def export_resnet18_to_onnx(
-    model: MultiOutputResNet18,
+# Backward-compatibility alias
+ResNet18OnnxWrapper = MultiOutputOnnxWrapper
+
+
+def export_model_to_onnx(
+    model: nn.Module,
     settings: TrainingSettings | None = None,
 ) -> tuple[Path, Path]:
-    """Export ResNet18 to ONNX and quantize to INT8.
+    """Export multi-output CNN model to ONNX and quantize to INT8.
 
     Returns:
         tuple of (fp32_onnx_path, int8_onnx_path)
@@ -48,7 +51,7 @@ def export_resnet18_to_onnx(
     cfg.onnx_int8_output_path.parent.mkdir(parents=True, exist_ok=True)
 
     model.eval()
-    wrapper = ResNet18OnnxWrapper(model).cpu()
+    wrapper = MultiOutputOnnxWrapper(model).cpu()
     dummy_input = torch.randn(1, 3, 224, 224, requires_grad=False)
 
     input_names = ["input"]
@@ -71,7 +74,7 @@ def export_resnet18_to_onnx(
         "act_layer5": {0: "batch_size"},
     }
 
-    print(f"\n[ONNX] Exporting ResNet18 to {cfg.onnx_output_path}...")
+    print(f"\n[ONNX] Exporting {cfg.model_name} to {cfg.onnx_output_path}...")
     torch.onnx.export(
         wrapper,
         dummy_input,
@@ -109,3 +112,7 @@ def export_resnet18_to_onnx(
     print(f"[ONNX] Verification successful! Logits shape: {ort_outputs[0].shape}")
 
     return cfg.onnx_output_path, cfg.onnx_int8_output_path
+
+
+# Backward-compatibility alias
+export_resnet18_to_onnx = export_model_to_onnx

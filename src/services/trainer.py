@@ -1,4 +1,4 @@
-"""Trainer service for fine-tuning ResNet18 on Caltech-256 with curve tracking."""
+"""Trainer service for fine-tuning CNNs on Caltech-256 with curve tracking."""
 
 import json
 import time
@@ -16,7 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from src.config.settings import TrainingSettings
 from src.core.dataset import build_dataloaders
-from src.core.model import MultiOutputResNet18
+from src.core.model import create_multi_output_model
 
 
 def compute_topk_accuracy(
@@ -109,19 +109,17 @@ def plot_training_curves(history: dict[str, list], output_path: Path) -> Path:
         label="Val Top-5 Acc (%)",
     )
 
-    # Highlight best validation point
+    # Highlight best validation epoch
     if history["val_top1"]:
-        best_val = max(history["val_top1"])
-        best_idx = history["val_top1"].index(best_val)
-        best_ep = epochs[best_idx]
+        best_acc = max(history["val_top1"])
+        best_ep = epochs[history["val_top1"].index(best_acc)]
         ax_acc.annotate(
-            f"Peak: {best_val:.2f}%",
-            xy=(best_ep, best_val),
-            xytext=(best_ep, best_val - 4),
+            f"Best: {best_acc:.2f}% (Ep {best_ep})",
+            xy=(best_ep, best_acc),
+            xytext=(best_ep, best_acc - 6),
             arrowprops={
                 "facecolor": "#f59e0b",
-                "edgecolor": "#f59e0b",
-                "shrink": 0.08,
+                "shrink": 0.05,
                 "width": 1.5,
                 "headwidth": 6,
             },
@@ -159,14 +157,15 @@ def plot_training_curves(history: dict[str, list], output_path: Path) -> Path:
     return output_path
 
 
-class ResNet18Trainer:
-    """Manages the 2-phase warmup and fine-tuning lifecycle for ResNet18."""
+class CNNTrainer:
+    """Manages the 2-phase warmup and fine-tuning lifecycle for multi-output CNNs."""
 
     def __init__(self, settings: TrainingSettings | None = None):
         self.settings = settings or TrainingSettings()
         self.device = torch.device(self.settings.device if torch.cuda.is_available() else "cpu")
 
-        self.model = MultiOutputResNet18(
+        self.model = create_multi_output_model(
+            model_name=self.settings.model_name,
             num_classes=self.settings.num_classes,
             pretrained=True,
         ).to(self.device)
@@ -180,6 +179,8 @@ class ResNet18Trainer:
         self.writer = SummaryWriter(log_dir=str(self.settings.tensorboard_dir))
 
         self.best_val_acc: float = 0.0
+        self.use_amp: bool = self.device.type == "cuda"
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
 
         # Full metric history
         self.history: dict[str, list] = {
@@ -212,17 +213,20 @@ class ResNet18Trainer:
             targets = targets.to(self.device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
-            outputs = self.model(images, return_features=False)
-            loss = self.criterion(outputs, targets)
-            loss.backward()
-            optimizer.step()
+            with torch.amp.autocast(device_type="cuda", enabled=self.use_amp):
+                outputs = self.model(images, return_features=False)
+                loss = self.criterion(outputs, targets)
+
+            self.scaler.scale(loss).backward()
+            self.scaler.step(optimizer)
+            self.scaler.update()
 
             top1, top5 = compute_topk_accuracy(outputs, targets, topk=(1, 5))
             running_loss += loss.item()
             running_top1 += top1
             running_top5 += top5
 
-            if (batch_idx + 1) % 25 == 0 or (batch_idx + 1) == total_batches:
+            if (batch_idx + 1) % 50 == 0 or (batch_idx + 1) == total_batches:
                 elapsed = time.time() - start_time
                 print(
                     f"[{phase_name} Ep {epoch}] Step {batch_idx + 1}/{total_batches} "
@@ -250,29 +254,19 @@ class ResNet18Trainer:
                 images = images.to(self.device, non_blocking=True)
                 targets = targets.to(self.device, non_blocking=True)
 
-                outputs = self.model(images, return_features=False)
-                loss = self.criterion(outputs, targets)
+                with torch.amp.autocast(device_type="cuda", enabled=self.use_amp):
+                    outputs = self.model(images, return_features=False)
+                    loss = self.criterion(outputs, targets)
 
                 top1, top5 = compute_topk_accuracy(outputs, targets, topk=(1, 5))
                 running_loss += loss.item()
                 running_top1 += top1
                 running_top5 += top5
 
-        avg_loss = running_loss / max(1, total_batches)
-        avg_top1 = running_top1 / max(1, total_batches)
-        avg_top5 = running_top5 / max(1, total_batches)
+        avg_loss = running_loss / total_batches
+        avg_top1 = running_top1 / total_batches
+        avg_top5 = running_top5 / total_batches
         return avg_loss, avg_top1, avg_top5
-
-    def save_checkpoint(self, path: Path, val_acc: float, epoch: int) -> None:
-        """Save model checkpoint."""
-        checkpoint = {
-            "epoch": epoch,
-            "val_acc": val_acc,
-            "classes": self.classes,
-            "model_state_dict": self.model.state_dict(),
-        }
-        torch.save(checkpoint, path)
-        print(f" Saved checkpoint with Top-1 Val Acc {val_acc:.2f}% to {path}", flush=True)
 
     def _record_epoch_metrics(
         self,
@@ -286,39 +280,46 @@ class ResNet18Trainer:
         lr_head: float,
         lr_backbone: float,
     ) -> None:
-        """Record epoch metrics into history, JSON, and plot curves."""
+        """Log epoch metrics to TensorBoard and memory history."""
         self.history["epoch"].append(epoch)
         self.history["phase"].append(phase)
-        self.history["train_loss"].append(round(train_loss, 4))
-        self.history["val_loss"].append(round(val_loss, 4))
-        self.history["train_top1"].append(round(train_top1, 2))
-        self.history["val_top1"].append(round(val_top1, 2))
-        self.history["val_top5"].append(round(val_top5, 2))
+        self.history["train_loss"].append(train_loss)
+        self.history["val_loss"].append(val_loss)
+        self.history["train_top1"].append(train_top1)
+        self.history["val_top1"].append(val_top1)
+        self.history["val_top5"].append(val_top5)
         self.history["lr_head"].append(lr_head)
         self.history["lr_backbone"].append(lr_backbone)
 
-        # Write to JSON
-        self.settings.history_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.settings.history_path, "w", encoding="utf-8") as f:
+        self.writer.add_scalar("Loss/Train", train_loss, epoch)
+        self.writer.add_scalar("Loss/Val", val_loss, epoch)
+        self.writer.add_scalar("Accuracy/Train_Top1", train_top1, epoch)
+        self.writer.add_scalar("Accuracy/Val_Top1", val_top1, epoch)
+        self.writer.add_scalar("Accuracy/Val_Top5", val_top5, epoch)
+        self.writer.add_scalar("LR/Head", lr_head, epoch)
+        self.writer.add_scalar("LR/Backbone", lr_backbone, epoch)
+
+        with open(self.settings.history_path, "w") as f:
             json.dump(self.history, f, indent=2)
 
-        # Update curves plot image
         plot_training_curves(self.history, self.settings.plot_path)
 
-        # TensorBoard
-        self.writer.add_scalar("Loss/train", train_loss, epoch)
-        self.writer.add_scalar("Loss/val", val_loss, epoch)
-        self.writer.add_scalar("Accuracy/train_top1", train_top1, epoch)
-        self.writer.add_scalar("Accuracy/val_top1", val_top1, epoch)
-        self.writer.add_scalar("Accuracy/val_top5", val_top5, epoch)
-        self.writer.add_scalar("LR/head", lr_head, epoch)
-        self.writer.add_scalar("LR/backbone", lr_backbone, epoch)
+    def save_checkpoint(self, path: Path, val_acc: float, epoch: int) -> None:
+        """Save model checkpoint dictionary."""
+        checkpoint = {
+            "epoch": epoch,
+            "model_state_dict": self.model.state_dict(),
+            "best_val_acc": val_acc,
+            "settings": self.settings.model_dump(mode="json"),
+            "classes": self.classes,
+        }
+        torch.save(checkpoint, path)
+        print(f" Saved new best checkpoint: {path} (Val Top-1: {val_acc:.2f}%)", flush=True)
 
     def train(self) -> Path:
-        """Execute complete warmup and fine-tuning workflow with curve tracking."""
-        print("\n==========================================", flush=True)
-        print(" Starting ResNet18 Caltech-256 Training", flush=True)
-        print(f" Device: {self.device}", flush=True)
+        """Execute 2-phase training lifecycle: Warmup head then fine-tune backbone."""
+        print(f" Starting {self.settings.model_name.upper()} Caltech-256 Training", flush=True)
+        print(f" Device: {self.device} (AMP: {self.use_amp})", flush=True)
         print(
             f" Train batches: {len(self.train_loader)}, Val batches: {len(self.val_loader)}",
             flush=True,
@@ -340,8 +341,9 @@ class ResNet18Trainer:
         if self.settings.epochs_warmup > 0:
             print("--- Phase 1: Classification Head Warmup ---", flush=True)
             self.model.freeze_backbone()
+            head_params = [p for p in self.model.parameters() if p.requires_grad]
             optimizer_warmup = AdamW(
-                self.model.fc.parameters(),
+                head_params,
                 lr=self.settings.lr_head,
                 weight_decay=self.settings.weight_decay,
             )
@@ -432,3 +434,7 @@ class ResNet18Trainer:
         print(f" Training curves saved to: {self.settings.plot_path}", flush=True)
         print(f" Metric history saved to: {self.settings.history_path}", flush=True)
         return best_checkpoint_path
+
+
+# Backward-compatibility alias
+ResNet18Trainer = CNNTrainer
