@@ -183,9 +183,10 @@ export class CNNInferenceEngine {
     const results = await this.session.run(feeds);
     const tInfer = performance.now();
 
-    // 1. Process Class Predictions (logits output)
+    // 1. Process Class Predictions and Dense Layer Output
     const logitsOutput = results['logits'] || results[this.session.outputNames[0]];
-    const topPredictions = this.computeTopPredictions(logitsOutput.data);
+    const denseLayer = this.computeDenseLayer(logitsOutput.data, 8);
+    const topPredictions = denseLayer.topPredictions;
 
     // 2. Extract multi-layer activation maps
     const activations = {};
@@ -215,6 +216,7 @@ export class CNNInferenceEngine {
 
     return {
       topPredictions,
+      denseLayer,
       activations,
       gradCamHeatmap,
       timings: {
@@ -226,12 +228,14 @@ export class CNNInferenceEngine {
   }
 
   /**
-   * Numerically stable softmax and top-5 selection
+   * Numerically stable softmax and complete dense layer representation
    */
-  computeTopPredictions(logitsData, topK = 5) {
+  computeDenseLayer(logitsData, topK = 8) {
     let maxLogit = -Infinity;
+    let minLogit = Infinity;
     for (let i = 0; i < logitsData.length; i++) {
       if (logitsData[i] > maxLogit) maxLogit = logitsData[i];
+      if (logitsData[i] < minLogit) minLogit = logitsData[i];
     }
 
     let sumExp = 0.0;
@@ -250,11 +254,26 @@ export class CNNInferenceEngine {
     const indexed = Array.from(probs, (prob, idx) => ({
       classId: idx,
       className: this.labels[idx] || `Class ${idx}`,
-      probability: prob
+      probability: prob,
+      logit: logitsData[idx]
     }));
 
     indexed.sort((a, b) => b.probability - a.probability);
-    return indexed.slice(0, topK);
+    const topPredictions = indexed.slice(0, topK);
+
+    return {
+      topPredictions,
+      probabilities: probs,
+      logits: logitsData,
+      numClasses: logitsData.length,
+      maxLogit,
+      minLogit,
+      top1Margin: indexed.length > 1 ? indexed[0].probability - indexed[1].probability : indexed[0].probability
+    };
+  }
+
+  computeTopPredictions(logitsData, topK = 5) {
+    return this.computeDenseLayer(logitsData, topK).topPredictions;
   }
 
   /**

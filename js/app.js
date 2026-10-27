@@ -1,11 +1,23 @@
 /**
  * Real-Time CNN Visualizer - Main Application Orchestrator
  * Connects Webcam, executes ONNX Runtime Web via WebGPU/WASM,
- * and renders interactive multi-layer feature maps and Grad-CAM overlays.
+ * and renders:
+ *  - 8 Rows × 5 Columns Convolutional Feature Hierarchy (deeper layers from left to right)
+ *  - Final Dense Layer 256-Neuron Activation Matrix & Softmax Class Probabilities
+ *  - Grad-CAM Attention Heatmap & Single Kernel Zoom Inspector
  */
 
 import { CNNInferenceEngine } from './inference.js';
 import { COLORMAPS, getRGB } from './colormaps.js';
+
+export const LAYER_KEYS = ['act_layer1', 'act_layer2', 'act_layer3', 'act_layer4', 'act_layer5'];
+export const LAYER_TITLES = [
+  'Layer 1 (Stem)',
+  'Layer 2 (Block 1)',
+  'Layer 3 (Block 2)',
+  'Layer 4 (Block 3)',
+  'Layer 5 (Deep)'
+];
 
 export const MODEL_CONFIGS = {
   RESNET18_INT8: {
@@ -43,10 +55,8 @@ class RealtimeCNNApp {
       onStatusChange: this.handleEngineStatus.bind(this)
     });
 
-    // State
+    // Model & Stream State
     this.selectedModelKey = 'RESNET18_INT8';
-    this.activeLayerKey = 'act_layer1';
-    this.selectedChannel = 0;
     this.colormap = COLORMAPS.JET;
     this.showGradCam = true;
     this.gradCamAlpha = 0.55;
@@ -55,17 +65,24 @@ class RealtimeCNNApp {
     this.activeMediaElement = null;
     this.mediaStream = null;
 
+    // 8 Rows × 5 Columns Grid State
+    this.gridCols = 5;
+    this.gridRows = 8;
+    this.bankOffset = 0; // Starts at channel 0 (channels 0..7)
+    this.selectedCol = 0; // Selected column in 8x5 grid (0..4)
+    this.selectedRow = 0; // Selected row in 8x5 grid (0..7)
+
+    // Dense Layer State
+    this.hoverDenseIndex = -1;
+    this.lastDenseLayer = null;
+    this.lastActivations = null;
+
     // Performance tracking
     this.fps = 0;
-    this.lastFrameTime = performance.now();
     this.frameCount = 0;
     this.fpsUpdateTime = performance.now();
 
-    // Montage configuration
-    this.montageCols = 6;
-    this.montageRows = 6;
-
-    // Cache DOM
+    // Cached DOM
     this.dom = {};
   }
 
@@ -76,12 +93,12 @@ class RealtimeCNNApp {
     // 1. Load Caltech-256 class labels
     await this.engine.loadLabels('caltech_labels.json');
 
-    // 2. Load fine-tuned ResNet-18 model (~11MB)
+    // 2. Load default fine-tuned ResNet-18 model (~11MB)
     const initialConfig = MODEL_CONFIGS[this.selectedModelKey] || MODEL_CONFIGS.RESNET18_INT8;
     try {
       await this.engine.loadModel(initialConfig.url);
     } catch (err) {
-      console.warn('Initial model load failed, prompt for file or fallback:', err);
+      console.warn('Initial model load failed, fallback available:', err);
     }
 
     // 3. Start Webcam
@@ -118,27 +135,31 @@ class RealtimeCNNApp {
       sliderGradCamAlpha: document.getElementById('gradcam-alpha'),
       alphaDisplay: document.getElementById('alpha-display'),
 
-      // Predictions
-      predictionsList: document.getElementById('predictions-list'),
-      topClassDisplay: document.getElementById('top-class-display'),
-
-      // Layer tabs
-      layerTabsContainer: document.getElementById('layer-tabs'),
-
-      // Feature Map Montage
-      montageCanvas: document.getElementById('montage-canvas'),
-      montageTitle: document.getElementById('montage-title'),
-      montageDimsBadge: document.getElementById('montage-dims-badge'),
-      colormapSelect: document.getElementById('colormap-select'),
-
-      // Single Channel Zoom Inspector
+      // Single Kernel Zoom Inspector
       singleChannelCanvas: document.getElementById('single-channel-canvas'),
-      channelIndexSlider: document.getElementById('channel-index-slider'),
-      channelIndexDisplay: document.getElementById('channel-index-display'),
+      zoomKernelLayerDisplay: document.getElementById('zoom-kernel-layer-display'),
+      zoomKernelDims: document.getElementById('zoom-kernel-dims'),
       statChannelMin: document.getElementById('stat-channel-min'),
       statChannelMax: document.getElementById('stat-channel-max'),
       statChannelMean: document.getElementById('stat-channel-mean'),
-      statChannelSparsity: document.getElementById('stat-channel-sparsity')
+      statChannelSparsity: document.getElementById('stat-channel-sparsity'),
+
+      // 8x5 Convolutional Grid
+      convGridCanvas: document.getElementById('conv-grid-canvas'),
+      colormapSelect: document.getElementById('colormap-select'),
+      btnBankPrev: document.getElementById('btn-bank-prev'),
+      btnBankNext: document.getElementById('btn-bank-next'),
+      bankLabel: document.getElementById('bank-label'),
+
+      // Final Dense Layer
+      denseMatrixCanvas: document.getElementById('dense-matrix-canvas'),
+      denseNeuronHover: document.getElementById('dense-neuron-hover'),
+      topClassDisplay: document.getElementById('top-class-display'),
+      metricTopConf: document.getElementById('metric-top-conf'),
+      metricMargin: document.getElementById('metric-margin'),
+      metricMaxLogit: document.getElementById('metric-max-logit'),
+      metricMinLogit: document.getElementById('metric-min-logit'),
+      predictionsList: document.getElementById('predictions-list')
     };
   }
 
@@ -263,36 +284,89 @@ class RealtimeCNNApp {
       });
     }
 
-    // Channel Index Slider
-    if (this.dom.channelIndexSlider) {
-      this.dom.channelIndexSlider.addEventListener('input', (e) => {
-        this.selectedChannel = parseInt(e.target.value, 10);
-        if (this.dom.channelIndexDisplay) {
-          this.dom.channelIndexDisplay.textContent = `Channel #${this.selectedChannel}`;
-        }
+    // Bank Stepper Controls (Previous & Next Bank of 8 channels)
+    if (this.dom.btnBankPrev) {
+      this.dom.btnBankPrev.addEventListener('click', () => {
+        this.bankOffset = Math.max(0, this.bankOffset - 8);
+        this.updateBankLabel();
       });
     }
 
-    // Clicking inside Montage Canvas selects channel!
-    if (this.dom.montageCanvas) {
-      this.dom.montageCanvas.addEventListener('click', (e) => {
-        const rect = this.dom.montageCanvas.getBoundingClientRect();
+    if (this.dom.btnBankNext) {
+      this.dom.btnBankNext.addEventListener('click', () => {
+        this.bankOffset = Math.min(56, this.bankOffset + 8);
+        this.updateBankLabel();
+      });
+    }
+
+    // 8x5 Conv Grid Click Selection
+    if (this.dom.convGridCanvas) {
+      this.dom.convGridCanvas.addEventListener('click', (e) => {
+        const rect = this.dom.convGridCanvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-        const col = Math.floor((x / rect.width) * this.montageCols);
-        const row = Math.floor((y / rect.height) * this.montageRows);
-        const clickedIdx = row * this.montageCols + col;
-        
-        if (this.lastActivations && this.lastActivations[this.activeLayerKey]) {
-          const maxChannels = this.lastActivations[this.activeLayerKey].channels;
-          if (clickedIdx < maxChannels) {
-            this.selectedChannel = clickedIdx;
-            if (this.dom.channelIndexSlider) this.dom.channelIndexSlider.value = clickedIdx;
-            if (this.dom.channelIndexDisplay) this.dom.channelIndexDisplay.textContent = `Channel #${clickedIdx}`;
+        const col = Math.floor((x / rect.width) * this.gridCols);
+        const row = Math.floor((y / rect.height) * this.gridRows);
+
+        if (col >= 0 && col < this.gridCols && row >= 0 && row < this.gridRows) {
+          this.selectedCol = col;
+          this.selectedRow = row;
+          if (this.lastActivations) {
+            this.renderSingleKernelZoom(this.lastActivations);
           }
         }
       });
     }
+
+    // Final Dense Layer Matrix Hover & Mouseleave
+    if (this.dom.denseMatrixCanvas) {
+      this.dom.denseMatrixCanvas.addEventListener('mousemove', (e) => {
+        const rect = this.dom.denseMatrixCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const col = Math.floor((x / rect.width) * 16);
+        const row = Math.floor((y / rect.height) * 16);
+        const idx = row * 16 + col;
+
+        if (idx >= 0 && idx < 256) {
+          this.hoverDenseIndex = idx;
+          this.updateDenseHoverReadout(idx);
+        }
+      });
+
+      this.dom.denseMatrixCanvas.addEventListener('mouseleave', () => {
+        this.hoverDenseIndex = -1;
+        if (this.dom.denseNeuronHover) {
+          this.dom.denseNeuronHover.textContent = 'Hover over any neuron to inspect class probability & logit';
+        }
+      });
+    }
+  }
+
+  updateBankLabel() {
+    if (this.dom.bankLabel) {
+      const bankNum = Math.floor(this.bankOffset / 8) + 1;
+      this.dom.bankLabel.textContent = `Showing Channels ${this.bankOffset} – ${this.bankOffset + 7} (Bank ${bankNum} of 8)`;
+    }
+  }
+
+  updateDenseHoverReadout(classId) {
+    if (!this.dom.denseNeuronHover) return;
+
+    const className = (this.engine.labels && this.engine.labels[classId]) || `Class #${classId}`;
+    let probStr = '--%';
+    let logitStr = '--';
+
+    if (this.lastDenseLayer && this.lastDenseLayer.probabilities) {
+      const p = this.lastDenseLayer.probabilities[classId];
+      const logit = this.lastDenseLayer.logits[classId];
+      probStr = `${(p * 100).toFixed(2)}%`;
+      logitStr = logit !== undefined ? logit.toFixed(2) : '--';
+    }
+
+    this.dom.denseNeuronHover.innerHTML = `
+      <strong>Neuron #${classId} (${className})</strong>: Prob <strong>${probStr}</strong> • Logit: <strong>${logitStr}</strong>
+    `;
   }
 
   handleEngineStatus({ status, message, backend }) {
@@ -376,17 +450,21 @@ class RealtimeCNNApp {
       try {
         const results = await this.engine.runInference(this.activeMediaElement);
         this.lastActivations = results.activations;
+        this.lastDenseLayer = results.denseLayer;
 
-        // 1. Render Top-5 Predictions
-        this.renderPredictions(results.topPredictions);
+        // 1. Render 8 Rows × 5 Columns Convolutional Feature Grid
+        this.renderConvGrid(results.activations);
 
-        // 2. Render Grad-CAM Heatmap Overlay
+        // 2. Render Single Kernel Zoom Inspector
+        this.renderSingleKernelZoom(results.activations);
+
+        // 3. Render Final Dense Layer & Top Class Probabilities
+        this.renderDenseLayer(results.denseLayer);
+
+        // 4. Render Grad-CAM Heatmap Overlay
         this.renderGradCamOverlay(results.gradCamHeatmap);
 
-        // 3. Render Feature Map Montage & Single Channel
-        this.renderActivationMaps(results.activations);
-
-        // 4. Update Latency & FPS
+        // 5. Update Latency & FPS Performance Metrics
         this.updatePerformanceMetrics(results.timings);
       } catch (err) {
         console.error('Inference render error:', err);
@@ -396,13 +474,220 @@ class RealtimeCNNApp {
     requestAnimationFrame(this.renderLoop.bind(this));
   }
 
-  renderPredictions(topPredictions) {
-    if (!this.dom.predictionsList || !topPredictions.length) return;
+  /**
+   * Render 8 Rows × 5 Columns Convolutional Feature Hierarchy Canvas
+   * Columns 0..4 = Progressively deeper layers (Layer 1 Stem -> Layer 5 Deep)
+   * Rows 0..7    = 8 feature channels (bankOffset + row)
+   */
+  renderConvGrid(activations) {
+    const canvas = this.dom.convGridCanvas;
+    if (!canvas || !activations) return;
 
-    if (this.dom.topClassDisplay) {
-      const top = topPredictions[0];
-      this.dom.topClassDisplay.textContent = `${top.className} (${(top.probability * 100).toFixed(1)}%)`;
+    const ctx = canvas.getContext('2d');
+    const cols = this.gridCols; // 5
+    const rows = this.gridRows; // 8
+    const cellW = canvas.width / cols;
+    const cellH = canvas.height / rows;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (let c = 0; c < cols; c++) {
+      const layerKey = LAYER_KEYS[c];
+      const layer = activations[layerKey];
+      if (!layer) continue;
+
+      const planeSize = layer.width * layer.height;
+
+      for (let r = 0; r < rows; r++) {
+        const channelIdx = (this.bankOffset + r) % layer.channels;
+        const channelOffset = channelIdx * planeSize;
+
+        const cellX = c * cellW;
+        const cellY = r * cellH;
+
+        // Find min and max for local normalization
+        let minVal = Infinity;
+        let maxVal = -Infinity;
+        for (let i = 0; i < planeSize; i++) {
+          const v = layer.data[channelOffset + i];
+          if (v < minVal) minVal = v;
+          if (v > maxVal) maxVal = v;
+        }
+        const range = maxVal - minVal > 1e-4 ? maxVal - minVal : 1.0;
+
+        // Draw feature map pixels
+        const pW = cellW / layer.width;
+        const pH = cellH / layer.height;
+
+        for (let py = 0; py < layer.height; py++) {
+          for (let px = 0; px < layer.width; px++) {
+            const raw = layer.data[channelOffset + py * layer.width + px];
+            const norm = (raw - minVal) / range;
+            const [red, green, blue] = getRGB(norm, this.colormap);
+            ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+            ctx.fillRect(cellX + px * pW, cellY + py * pH, pW + 0.5, pH + 0.5);
+          }
+        }
+
+        // Selected Cell Highlight (Luminous Cyan border)
+        const isSelected = c === this.selectedCol && r === this.selectedRow;
+        if (isSelected) {
+          ctx.strokeStyle = '#00f5d4';
+          ctx.lineWidth = 3;
+          ctx.strokeRect(cellX + 1.5, cellY + 1.5, cellW - 3, cellH - 3);
+
+          // Subtle inner glow
+          ctx.fillStyle = 'rgba(0, 245, 212, 0.15)';
+          ctx.fillRect(cellX, cellY, cellW, cellH);
+        } else {
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(cellX + 0.5, cellY + 0.5, cellW - 1, cellH - 1);
+        }
+
+        // Draw Channel Badge in top-left
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fillRect(cellX + 3, cellY + 3, 24, 12);
+        ctx.fillStyle = isSelected ? '#00f5d4' : '#cbd5e1';
+        ctx.font = '600 9px monospace';
+        ctx.fillText(`#${channelIdx}`, cellX + 5, cellY + 12);
+      }
     }
+  }
+
+  /**
+   * Render Selected Kernel in the Single Kernel Zoom Inspector Panel
+   */
+  renderSingleKernelZoom(activations) {
+    const canvas = this.dom.singleChannelCanvas;
+    if (!canvas || !activations) return;
+
+    const layerKey = LAYER_KEYS[this.selectedCol];
+    const layer = activations[layerKey];
+    if (!layer) return;
+
+    const channelIdx = (this.bankOffset + this.selectedRow) % layer.channels;
+    const planeSize = layer.width * layer.height;
+    const channelOffset = channelIdx * planeSize;
+
+    // Update Header Displays
+    if (this.dom.zoomKernelLayerDisplay) {
+      this.dom.zoomKernelLayerDisplay.textContent = `${LAYER_TITLES[this.selectedCol]} • Ch #${channelIdx}`;
+    }
+    if (this.dom.zoomKernelDims) {
+      this.dom.zoomKernelDims.textContent = `${layer.width}×${layer.height}`;
+    }
+
+    let minVal = Infinity, maxVal = -Infinity, sum = 0, zeroCount = 0;
+    for (let i = 0; i < planeSize; i++) {
+      const v = layer.data[channelOffset + i];
+      if (v < minVal) minVal = v;
+      if (v > maxVal) maxVal = v;
+      sum += v;
+      if (Math.abs(v) < 1e-4) zeroCount++;
+    }
+    const mean = sum / planeSize;
+    const sparsity = (zeroCount / planeSize) * 100;
+    const range = maxVal - minVal > 1e-4 ? maxVal - minVal : 1.0;
+
+    // Draw enlarged 224x224 kernel
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const pW = canvas.width / layer.width;
+    const pH = canvas.height / layer.height;
+
+    for (let py = 0; py < layer.height; py++) {
+      for (let px = 0; px < layer.width; px++) {
+        const raw = layer.data[channelOffset + py * layer.width + px];
+        const norm = (raw - minVal) / range;
+        const [r, g, b] = getRGB(norm, this.colormap);
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.fillRect(px * pW, py * pH, pW + 0.5, pH + 0.5);
+      }
+    }
+
+    // Update Statistics Readouts
+    if (this.dom.statChannelMin) this.dom.statChannelMin.textContent = minVal.toFixed(2);
+    if (this.dom.statChannelMax) this.dom.statChannelMax.textContent = maxVal.toFixed(2);
+    if (this.dom.statChannelMean) this.dom.statChannelMean.textContent = mean.toFixed(2);
+    if (this.dom.statChannelSparsity) this.dom.statChannelSparsity.textContent = `${sparsity.toFixed(1)}%`;
+  }
+
+  /**
+   * Render Final Dense Layer 256-Neuron Activation Matrix & Class Probabilities
+   */
+  renderDenseLayer(denseLayer) {
+    if (!denseLayer) return;
+
+    // 1. Draw 16×16 Output Neurons Heatmap
+    const canvas = this.dom.denseMatrixCanvas;
+    if (canvas && denseLayer.probabilities) {
+      const ctx = canvas.getContext('2d');
+      const probs = denseLayer.probabilities;
+      const cellW = canvas.width / 16;
+      const cellH = canvas.height / 16;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const winnerId = denseLayer.topPredictions[0]?.classId ?? -1;
+
+      for (let idx = 0; idx < 256; idx++) {
+        const col = idx % 16;
+        const row = Math.floor(idx / 16);
+        const x = col * cellW;
+        const y = row * cellH;
+
+        const p = probs[idx] || 0.0;
+        // Non-linear energy stretch: Math.pow(p, 0.45) highlights both subtle runner-ups and dominant peaks
+        const energy = Math.min(1.0, Math.pow(p, 0.42));
+        const [r, g, b] = getRGB(energy, this.colormap);
+
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+
+        // Highlight Winning Neuron with glowing indicator
+        if (idx === winnerId) {
+          ctx.strokeStyle = '#00f5d4';
+          ctx.lineWidth = 2.5;
+          ctx.strokeRect(x + 1, y + 1, cellW - 2, cellH - 2);
+        } else if (idx === this.hoverDenseIndex) {
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(x + 1, y + 1, cellW - 2, cellH - 2);
+        } else {
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x + 0.5, y + 0.5, cellW - 1, cellH - 1);
+        }
+      }
+    }
+
+    // 2. Update Decision Metrics
+    if (denseLayer.topPredictions && denseLayer.topPredictions.length > 0) {
+      const top = denseLayer.topPredictions[0];
+      if (this.dom.topClassDisplay) {
+        this.dom.topClassDisplay.textContent = `${top.className} (${(top.probability * 100).toFixed(1)}%)`;
+      }
+      if (this.dom.metricTopConf) {
+        this.dom.metricTopConf.textContent = `${(top.probability * 100).toFixed(1)}%`;
+      }
+      if (this.dom.metricMargin) {
+        this.dom.metricMargin.textContent = `+${(denseLayer.top1Margin * 100).toFixed(1)}%`;
+      }
+      if (this.dom.metricMaxLogit) {
+        this.dom.metricMaxLogit.textContent = denseLayer.maxLogit.toFixed(1);
+      }
+      if (this.dom.metricMinLogit) {
+        this.dom.metricMinLogit.textContent = denseLayer.minLogit.toFixed(1);
+      }
+    }
+
+    // 3. Render Top-Ranked Prediction Bars
+    this.renderPredictionsList(denseLayer.topPredictions);
+  }
+
+  renderPredictionsList(topPredictions) {
+    if (!this.dom.predictionsList || !topPredictions || !topPredictions.length) return;
 
     this.dom.predictionsList.innerHTML = topPredictions.map((pred, idx) => {
       const percent = (pred.probability * 100).toFixed(1);
@@ -411,7 +696,7 @@ class RealtimeCNNApp {
         <div class="prediction-row ${isTop ? 'prediction-top' : ''}">
           <div class="pred-label-row">
             <span class="pred-rank">#${idx + 1}</span>
-            <span class="pred-name">${pred.className}</span>
+            <span class="pred-name" title="${pred.className} (Class ${pred.classId})">${pred.className}</span>
             <span class="pred-pct">${percent}%</span>
           </div>
           <div class="pred-bar-track">
@@ -463,164 +748,6 @@ class RealtimeCNNApp {
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(offCanvas, 0, 0, displayW, displayH);
     ctx.restore();
-  }
-
-  renderActivationMaps(activations) {
-    if (!activations) return;
-
-    // 1. Build layer tabs if not yet built
-    this.ensureLayerTabs(activations);
-
-    const layer = activations[this.activeLayerKey];
-    if (!layer) return;
-
-    // 2. Render Montage Grid
-    this.renderMontage(layer);
-
-    // 3. Render Single Channel Inspector
-    this.renderSingleChannel(layer);
-  }
-
-  ensureLayerTabs(activations) {
-    const container = this.dom.layerTabsContainer;
-    if (!container || container.dataset.built === 'true') return;
-
-    container.innerHTML = Object.keys(activations).map((key, idx) => {
-      const layer = activations[key];
-      const isActive = key === this.activeLayerKey;
-      return `
-        <button class="layer-tab ${isActive ? 'active' : ''}" data-layer="${key}" type="button">
-          <span class="tab-badge">L${idx + 1}</span>
-          <span>${layer.name.split('(')[0].trim()}</span>
-          <span class="tab-sub">${layer.width}×${layer.height}</span>
-        </button>
-      `;
-    }).join('');
-
-    container.querySelectorAll('.layer-tab').forEach(btn => {
-      btn.addEventListener('click', () => {
-        container.querySelectorAll('.layer-tab').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        this.activeLayerKey = btn.dataset.layer;
-        this.selectedChannel = 0;
-        
-        // Update slider max
-        const layer = activations[this.activeLayerKey];
-        if (layer && this.dom.channelIndexSlider) {
-          this.dom.channelIndexSlider.max = layer.channels - 1;
-          this.dom.channelIndexSlider.value = 0;
-        }
-      });
-    });
-
-    container.dataset.built = 'true';
-  }
-
-  renderMontage(layer) {
-    const canvas = this.dom.montageCanvas;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    const cols = this.montageCols;
-    const rows = this.montageRows;
-    const totalVisible = Math.min(layer.channels, cols * rows);
-
-    const cellW = canvas.width / cols;
-    const cellH = canvas.height / rows;
-    const planeSize = layer.width * layer.height;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    for (let idx = 0; idx < totalVisible; idx++) {
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      const x = col * cellW;
-      const y = row * cellH;
-
-      // Extract channel data
-      const channelOffset = idx * planeSize;
-      
-      // Find min/max for local normalization
-      let minVal = Infinity, maxVal = -Infinity;
-      for (let i = 0; i < planeSize; i++) {
-        const v = layer.data[channelOffset + i];
-        if (v < minVal) minVal = v;
-        if (v > maxVal) maxVal = v;
-      }
-      const range = maxVal - minVal > 1e-4 ? maxVal - minVal : 1.0;
-
-      // Draw pixels to cell
-      const pW = cellW / layer.width;
-      const pH = cellH / layer.height;
-
-      for (let py = 0; py < layer.height; py++) {
-        for (let px = 0; px < layer.width; px++) {
-          const raw = layer.data[channelOffset + py * layer.width + px];
-          const norm = (raw - minVal) / range;
-          const [r, g, b] = getRGB(norm, this.colormap);
-          ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-          ctx.fillRect(x + px * pW, y + py * pH, pW + 0.5, pH + 0.5);
-        }
-      }
-
-      // Border around active channel
-      if (idx === this.selectedChannel) {
-        ctx.strokeStyle = '#00f5d4';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, cellW, cellH);
-      } else {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(x, y, cellW, cellH);
-      }
-    }
-
-    if (this.dom.montageDimsBadge) {
-      this.dom.montageDimsBadge.textContent = `${layer.channels} Ch • ${layer.width}×${layer.height}`;
-    }
-  }
-
-  renderSingleChannel(layer) {
-    const canvas = this.dom.singleChannelCanvas;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    const ch = Math.min(this.selectedChannel, layer.channels - 1);
-    const planeSize = layer.width * layer.height;
-    const channelOffset = ch * planeSize;
-
-    let minVal = Infinity, maxVal = -Infinity, sum = 0, zeroCount = 0;
-    for (let i = 0; i < planeSize; i++) {
-      const v = layer.data[channelOffset + i];
-      if (v < minVal) minVal = v;
-      if (v > maxVal) maxVal = v;
-      sum += v;
-      if (Math.abs(v) < 1e-4) zeroCount++;
-    }
-    const mean = sum / planeSize;
-    const sparsity = (zeroCount / planeSize) * 100;
-    const range = maxVal - minVal > 1e-4 ? maxVal - minVal : 1.0;
-
-    // Draw magnified channel
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const pW = canvas.width / layer.width;
-    const pH = canvas.height / layer.height;
-
-    for (let py = 0; py < layer.height; py++) {
-      for (let px = 0; px < layer.width; px++) {
-        const raw = layer.data[channelOffset + py * layer.width + px];
-        const norm = (raw - minVal) / range;
-        const [r, g, b] = getRGB(norm, this.colormap);
-        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-        ctx.fillRect(px * pW, py * pH, pW + 0.5, pH + 0.5);
-      }
-    }
-
-    // Update stats readouts
-    if (this.dom.statChannelMin) this.dom.statChannelMin.textContent = minVal.toFixed(2);
-    if (this.dom.statChannelMax) this.dom.statChannelMax.textContent = maxVal.toFixed(2);
-    if (this.dom.statChannelMean) this.dom.statChannelMean.textContent = mean.toFixed(2);
-    if (this.dom.statChannelSparsity) this.dom.statChannelSparsity.textContent = `${sparsity.toFixed(1)}%`;
   }
 
   updatePerformanceMetrics(timings) {

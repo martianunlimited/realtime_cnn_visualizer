@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Real-Time CNN Activation & Feature Visualizer | WebGPU In-Browser Deep Learning</title>
-  <meta name="description" content="Real-time in-browser convolutional neural network visualizer powered by WebGPU and ONNX Runtime Web. Live webcam feed, multi-layer activation maps, and Grad-CAM attention. Zero server required.">
+  <meta name="description" content="Real-time in-browser convolutional neural network visualizer powered by WebGPU and ONNX Runtime Web. 8 rows by 5 columns multi-layer kernel hierarchy, final dense layer class probabilities, and Grad-CAM attention.">
   <link rel="stylesheet" href="css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22><text y=%2222%22 font-size=%2222%22>⚡</text></svg>">
   <!-- ONNX Runtime Web (WebGPU & WebAssembly) -->
@@ -18,7 +18,7 @@
       <div class="brand-icon">⚡</div>
       <div class="brand-titles">
         <h1>Real-Time CNN Visualizer</h1>
-        <div class="brand-subtitle">WebGPU & WebAssembly In-Browser Inference • Multi-Layer Activations & Grad-CAM</div>
+        <div class="brand-subtitle">WebGPU & WebAssembly In-Browser Inference • 8×5 Multi-Layer Conv Hierarchy • Final Dense Layer</div>
       </div>
     </div>
 
@@ -52,14 +52,59 @@
       </div>
     </section>
 
-    <!-- Main Two-Column Dashboard -->
+    <!-- Neural Network Pipeline Architecture Flow Banner -->
+    <nav class="pipeline-flow-banner" aria-label="Neural Network Architecture Flow">
+      <div class="flow-step">
+        <span class="flow-dot"></span>
+        <span class="flow-title">Input Frame</span>
+        <span class="flow-dim">224×224</span>
+      </div>
+      <div class="flow-arrow">➔</div>
+      <div class="flow-step">
+        <span class="flow-tag">Col 1</span>
+        <span class="flow-title">Layer 1 (Stem)</span>
+        <span class="flow-dim">112×112</span>
+      </div>
+      <div class="flow-arrow">➔</div>
+      <div class="flow-step">
+        <span class="flow-tag">Col 2</span>
+        <span class="flow-title">Layer 2 (Block 1)</span>
+        <span class="flow-dim">56×56</span>
+      </div>
+      <div class="flow-arrow">➔</div>
+      <div class="flow-step">
+        <span class="flow-tag">Col 3</span>
+        <span class="flow-title">Layer 3 (Block 2)</span>
+        <span class="flow-dim">28×28</span>
+      </div>
+      <div class="flow-arrow">➔</div>
+      <div class="flow-step">
+        <span class="flow-tag">Col 4</span>
+        <span class="flow-title">Layer 4 (Block 3)</span>
+        <span class="flow-dim">14×14</span>
+      </div>
+      <div class="flow-arrow">➔</div>
+      <div class="flow-step">
+        <span class="flow-tag">Col 5</span>
+        <span class="flow-title">Layer 5 (Deep)</span>
+        <span class="flow-dim">7×7</span>
+      </div>
+      <div class="flow-arrow">➔</div>
+      <div class="flow-step flow-step-dense">
+        <span class="flow-tag flow-tag-dense">Dense Head</span>
+        <span class="flow-title">Final FC Layer</span>
+        <span class="flow-dim">256 Classes</span>
+      </div>
+    </nav>
+
+    <!-- Main Three-Panel Dashboard -->
     <section class="dashboard-stage" id="dashboard-stage">
 
-      <!-- LEFT COLUMN: WEBCAM FEED, GRAD-CAM, AND PREDICTIONS -->
-      <article class="card" id="card-video-stream">
+      <!-- LEFT PANEL: CAMERA STREAM, GRAD-CAM & SINGLE KERNEL ZOOM -->
+      <article class="card card-stream-inspector" id="card-video-stream">
         <div class="card-header">
           <h2 class="card-title">
-            <span>📹</span> Camera Feed & Grad-CAM Attention
+            <span>📹</span> Camera Feed & Grad-CAM
           </h2>
           <span class="card-badge" id="camera-status-badge">Live Stream</span>
         </div>
@@ -98,35 +143,56 @@
         <div class="gradcam-controls-row">
           <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
             <input type="checkbox" id="toggle-gradcam" checked>
-            <strong>Grad-CAM Attention Overlay</strong>
+            <strong>Grad-CAM Overlay</strong>
           </label>
           <div style="display:flex; align-items:center; gap:8px;">
-            <label for="gradcam-alpha">Opacity:</label>
+            <label for="gradcam-alpha">Alpha:</label>
             <input type="range" id="gradcam-alpha" min="0" max="1" step="0.05" value="0.55" style="width:70px; accent-color:var(--accent-cyan);">
             <span id="alpha-display" style="font-family:var(--font-mono); font-size:0.75rem;">55%</span>
           </div>
         </div>
 
-        <!-- Live Classification Predictions -->
-        <div class="card-header" style="margin-top: 6px;">
-          <h3 class="card-title" style="font-size: 0.95rem;">
-            <span>🎯</span> Caltech-256 Top Predictions
-          </h3>
-          <span class="card-badge" id="top-class-display">Inferring...</span>
-        </div>
+        <!-- Single Kernel Zoom Inspector -->
+        <div class="single-channel-inspector">
+          <div class="inspector-header">
+            <div style="display:flex; flex-direction:column; gap:2px;">
+              <span class="inspector-sub">Selected Kernel Zoom</span>
+              <span class="inspector-title" id="zoom-kernel-layer-display">Layer 1 • Channel #0</span>
+            </div>
+            <span class="card-badge" id="zoom-kernel-dims">112×112</span>
+          </div>
 
-        <div class="predictions-container" id="predictions-list">
-          <div style="color:var(--text-muted); font-size:0.8rem; text-align:center; padding:12px;">
-            Awaiting model inference...
+          <div class="single-channel-wrap">
+            <canvas class="single-channel-canvas" id="single-channel-canvas" width="224" height="224" aria-label="Single Kernel Zoom Canvas"></canvas>
+          </div>
+
+          <!-- Kernel Statistics -->
+          <div class="channel-stats-grid">
+            <div class="channel-stat-item">
+              <span class="stat-label">Min Act</span>
+              <span class="stat-val" id="stat-channel-min">0.00</span>
+            </div>
+            <div class="channel-stat-item">
+              <span class="stat-label">Max Act</span>
+              <span class="stat-val" id="stat-channel-max">0.00</span>
+            </div>
+            <div class="channel-stat-item">
+              <span class="stat-label">Mean Act</span>
+              <span class="stat-val" id="stat-channel-mean">0.00</span>
+            </div>
+            <div class="channel-stat-item">
+              <span class="stat-label">Sparsity</span>
+              <span class="stat-val" id="stat-channel-sparsity">0.0%</span>
+            </div>
           </div>
         </div>
       </article>
 
-      <!-- RIGHT COLUMN: MULTI-LAYER ACTIVATION MAPS & CHANNEL INSPECTOR -->
-      <article class="card" id="card-activations">
+      <!-- CENTER PANEL: CONVOLUTIONAL KERNELS 8 ROWS × 5 COLUMNS -->
+      <article class="card card-conv-stage" id="card-conv-grid">
         <div class="card-header">
           <h2 class="card-title">
-            <span>🧠</span> Convolutional Layer Activations
+            <span>🧠</span> Convolutional Kernels (8 Rows × 5 Deeper Layers)
           </h2>
           <div style="display:flex; align-items:center; gap:8px;">
             <label for="colormap-select" style="font-size:0.75rem; color:var(--text-secondary);">Colormap:</label>
@@ -141,78 +207,125 @@
           </div>
         </div>
 
-        <!-- Layer Selector Tabs -->
-        <div class="layer-tabs" id="layer-tabs" aria-label="CNN Layers">
-          <!-- Dynamically populated from active model outputs -->
+        <!-- Channel Bank Stepper Controls -->
+        <div class="bank-stepper-bar">
+          <button class="btn-tool" id="btn-bank-prev" type="button" title="View previous 8 channels">◀ Previous Bank</button>
+          <div class="bank-indicator" id="bank-label">Showing Channels 0 – 7 (Bank 1 of 8)</div>
+          <button class="btn-tool" id="btn-bank-next" type="button" title="View next 8 channels">Next Bank ▶</button>
         </div>
 
-        <!-- Two-Panel Feature Maps Stage: Montage Grid + Single Channel Zoom -->
-        <div class="features-stage">
-          <!-- Left Sub-panel: Feature Map Montage Grid (like mapsToGrid in Qt) -->
-          <div class="montage-container">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-size:0.75rem; font-weight:600; color:var(--text-secondary);" id="montage-title">
-                Filter Montage Grid (Click any channel to zoom):
-              </span>
-              <span class="card-badge" id="montage-dims-badge">-- Channels</span>
-            </div>
-
-            <div class="montage-canvas-wrap">
-              <canvas class="montage-canvas" id="montage-canvas" width="480" height="480" aria-label="Feature Map Montage Grid"></canvas>
-            </div>
+        <!-- 5 Column Header Titles (Layers 1 through 5) -->
+        <div class="conv-grid-headers">
+          <div class="conv-col-header" data-col="0">
+            <span class="col-num">Col 1</span>
+            <span class="col-name">Layer 1</span>
+            <span class="col-sub">Stem • 112×112</span>
           </div>
-
-          <!-- Right Sub-panel: Single Channel Zoom Inspector -->
-          <div class="single-channel-inspector">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-size:0.75rem; font-weight:600; color:var(--accent-cyan);" id="channel-index-display">
-                Channel #0
-              </span>
-              <span style="font-size:0.7rem; color:var(--text-muted);">Enlarged</span>
-            </div>
-
-            <div class="single-channel-wrap">
-              <canvas class="single-channel-canvas" id="single-channel-canvas" width="224" height="224" aria-label="Single Channel Zoom Canvas"></canvas>
-            </div>
-
-            <!-- Channel Stepper Slider -->
-            <input type="range" id="channel-index-slider" min="0" max="63" value="0" style="width:100%; accent-color:var(--accent-cyan); cursor:pointer;">
-
-            <!-- Channel Statistics -->
-            <div class="channel-stats-grid">
-              <div class="channel-stat-item">
-                <span class="stat-label">Min Act</span>
-                <span class="stat-val" id="stat-channel-min">0.00</span>
-              </div>
-              <div class="channel-stat-item">
-                <span class="stat-label">Max Act</span>
-                <span class="stat-val" id="stat-channel-max">0.00</span>
-              </div>
-              <div class="channel-stat-item">
-                <span class="stat-label">Mean Act</span>
-                <span class="stat-val" id="stat-channel-mean">0.00</span>
-              </div>
-              <div class="channel-stat-item">
-                <span class="stat-label">Sparsity</span>
-                <span class="stat-val" id="stat-channel-sparsity">0.0%</span>
-              </div>
-            </div>
+          <div class="conv-col-header" data-col="1">
+            <span class="col-num">Col 2</span>
+            <span class="col-name">Layer 2</span>
+            <span class="col-sub">Block 1 • 56×56</span>
+          </div>
+          <div class="conv-col-header" data-col="2">
+            <span class="col-num">Col 3</span>
+            <span class="col-name">Layer 3</span>
+            <span class="col-sub">Block 2 • 28×28</span>
+          </div>
+          <div class="conv-col-header" data-col="3">
+            <span class="col-num">Col 4</span>
+            <span class="col-name">Layer 4</span>
+            <span class="col-sub">Block 3 • 14×14</span>
+          </div>
+          <div class="conv-col-header" data-col="4">
+            <span class="col-num">Col 5</span>
+            <span class="col-name">Layer 5</span>
+            <span class="col-sub">Deep • 7×7</span>
           </div>
         </div>
 
-        <!-- Educational Guide Box -->
-        <div class="educational-guide">
-          <div class="guide-title">💡 How Convolutional Layers Build Visual Representations</div>
-          <div class="guide-text">
-            <strong>Layer 1 (Stem / Early):</strong> Extracts low-level spatial primitives like oriented edges, gradients, and contrasting color patches.<br>
-            <strong>Layers 2 & 3 (Mid-level):</strong> Combines edges into textures, repeating motifs, corners, and geometric patterns.<br>
-            <strong>Layers 4 & 5 (Deep Semantic):</strong> Groups patterns into recognizable object parts (wheels, faces, wings) and full category concepts.<br>
-            <strong>Grad-CAM:</strong> Traces classification gradients back to the final convolutional feature maps to produce a spatial heatmap showing where the CNN is focusing.
+        <!-- 8 Rows × 5 Columns Live Feature Map Canvas -->
+        <div class="conv-grid-canvas-wrap">
+          <canvas class="conv-grid-canvas" id="conv-grid-canvas" width="500" height="800" aria-label="Convolutional Kernels 8 Rows by 5 Columns"></canvas>
+        </div>
+
+        <div class="conv-grid-footer">
+          <span>💡 <strong>Click any of the 40 cells</strong> to zoom that kernel in the inspector panel. Progresses from low-level edges on the left to deep semantic representations on the right.</span>
+        </div>
+      </article>
+
+      <!-- RIGHT PANEL: FINAL DENSE LAYER & CLASS PROBABILITIES -->
+      <article class="card card-dense-stage" id="card-dense-layer">
+        <div class="card-header">
+          <h2 class="card-title">
+            <span>🎯</span> Final Dense Layer & Probabilities
+          </h2>
+          <span class="card-badge" id="top-class-display">Inferring...</span>
+        </div>
+
+        <!-- 256-Neuron Dense Layer Activation Matrix -->
+        <div class="dense-matrix-section">
+          <div class="dense-section-header">
+            <span class="dense-title">256-Neuron Activation Matrix (16×16)</span>
+            <span class="dense-sub">Caltech-256 Output Units</span>
+          </div>
+
+          <div class="dense-matrix-wrap">
+            <canvas class="dense-matrix-canvas" id="dense-matrix-canvas" width="256" height="256" aria-label="256-Neuron Output Layer Matrix"></canvas>
+          </div>
+
+          <!-- Dynamic Hover Tooltip / Readout -->
+          <div class="dense-hover-badge" id="dense-neuron-hover">
+            Hover over any neuron to inspect class probability & logit
+          </div>
+        </div>
+
+        <!-- Dense Decision Metrics -->
+        <div class="dense-metrics-grid">
+          <div class="dense-metric-card">
+            <span class="dense-metric-label">Top-1 Conf</span>
+            <span class="dense-metric-val" id="metric-top-conf">--%</span>
+          </div>
+          <div class="dense-metric-card">
+            <span class="dense-metric-label">Runner-Up Margin</span>
+            <span class="dense-metric-val" id="metric-margin">--%</span>
+          </div>
+          <div class="dense-metric-card">
+            <span class="dense-metric-label">Max Logit</span>
+            <span class="dense-metric-val" id="metric-max-logit">--</span>
+          </div>
+          <div class="dense-metric-card">
+            <span class="dense-metric-label">Min Logit</span>
+            <span class="dense-metric-val" id="metric-min-logit">--</span>
+          </div>
+        </div>
+
+        <!-- Ranked Caltech-256 Predictions List -->
+        <div class="dense-predictions-section">
+          <div class="dense-section-header">
+            <span class="dense-title">Top Ranked Predictions</span>
+            <span class="dense-sub">Softmax Normalized</span>
+          </div>
+
+          <div class="predictions-container" id="predictions-list">
+            <div style="color:var(--text-muted); font-size:0.8rem; text-align:center; padding:12px;">
+              Awaiting model inference...
+            </div>
           </div>
         </div>
       </article>
 
     </section>
+
+    <!-- Educational Guide Box -->
+    <div class="educational-guide">
+      <div class="guide-title">💡 How Convolutional & Dense Layers Build Visual Representations</div>
+      <div class="guide-text">
+        <strong>Column 1 (Layer 1 Stem • 112×112):</strong> High-resolution spatial feature filters extracting early primitives: oriented edges, light/dark contrasts, and color transitions.<br>
+        <strong>Columns 2 & 3 (Layers 2 & 3 • 56×56 & 28×28):</strong> Intermediate receptive fields combining edges into textures, repeating motifs, corners, and curved geometric boundaries.<br>
+        <strong>Columns 4 & 5 (Layers 4 & 5 • 14×14 & 7×7):</strong> High-level semantic abstraction capturing object parts (e.g. eyes, animal snouts, wheels) regardless of slight position shifts.<br>
+        <strong>Final Dense Layer (256 Neurons):</strong> After Global Average Pooling flattens the 512 deep channels, the fully connected dense head computes dot-products against learned class weight vectors. The Softmax function converts these 256 logits into an absolute probability distribution shown in the 16×16 activation matrix and ranked prediction bars.
+      </div>
+    </div>
 
     <!-- Remote URL Modal -->
     <div class="modal-overlay hidden" id="url-modal">
